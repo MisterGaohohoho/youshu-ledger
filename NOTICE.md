@@ -44,7 +44,7 @@ Gradle Wrapper 使用 Apache-2.0；Release 网页构建工具 javascript-obfusca
 - Font Awesome 来自 [FortAwesome/Font-Awesome 6.5.2](https://github.com/FortAwesome/Font-Awesome/tree/6.5.2)，完整许可在 `app/src/main/assets/web/vendor/LICENSE.txt`，不删除署名。
 - 五家银行标识来自官网，仅用于识别账户类型，权利属于各银行，不表示服务关系或背书。来源见下方“银行图标来源”。GPL 不授予银行商标权，也不替代标识使用所需授权。
 - 微信、支付宝账户图标来自各自官网发布的原始图像，仅用于识别账户类别，未重绘。来源和机械适配见下方“支付品牌图标来源”；商标权属于相应权利人，GPL 不包含商标授权。
-- 有数应用图标采用本 Fork 新绘制的几何账页、三行账目与对勾，未使用第三方品牌素材；采用项目 GPL-3.0-only 许可。图标与 Android 自适应、单色资源说明见 `.github/branding/`。上游旧启动图标保留在 Git 历史中，当前 APK 已替换。源码许可不提供第三方品牌背书或商标许可。
+- The application icon uses the pixel-art tree supplied by the project maintainer on 2026-11-22. The original artwork checksum and Android adaptive, monochrome and notification adaptations are documented in `.github/branding/`. Depicted platform marks remain the trademarks of their respective owners; the project license does not grant trademark rights or imply endorsement. Earlier application icons remain in Git history.
 - 视觉参考为用户提供的 HTML ZIP，来源与摘要见下方“视觉参考来源”。原型原件没有独立开源许可，公共源码导出排除其原始 HTML、CSS 和归档；来源记录保留，不将第三方参考改标为 GPL。
 
 分发者需核对实际版本中的依赖与素材范围，同时提供对应源码、构建说明和许可原文。
