@@ -29,7 +29,7 @@ class OfflineBillsTest {
     @Test fun fileImportIsIdempotentAndUpdatesTheSameRefundAndAccount() {
         val account=store.saveAccount(LedgerAccount(name="测试微信",amountCents=100_000))
         store.setChannelDefaultAccount("wechat",account.uid)
-        assertEquals(1,PlatformStatements.apply(store,wx()).saved)
+        assertEquals(1,PlatformStatements.apply(store,wx(),selection=PlatformImportAccounts.Selection(mapOf("零钱" to account.uid),affectsBalance=true)).saved)
         val original=store.all().single()
         assertEquals(90_000L,store.accounts().single { it.uid==account.uid }.amountCents)
         assertEquals(1,PlatformStatements.apply(store,wx()).duplicates)
@@ -58,7 +58,7 @@ class OfflineBillsTest {
         val channel=store.saveAccount(LedgerAccount(name="微信账户",amountCents=50_000))
         store.setDefaultAccount(global.uid)
         store.setChannelDefaultAccount("wechat",channel.uid)
-        assertEquals(1,PlatformStatements.apply(store,wx(status="已退款(￥30.00)")).saved)
+        assertEquals(1,PlatformStatements.apply(store,wx(status="已退款(￥30.00)"),selection=PlatformImportAccounts.Selection(mapOf("零钱" to channel.uid),affectsBalance=true)).saved)
         val record=store.all().single()
         assertEquals(channel.uid,record.accountUid)
         assertEquals("午餐",record.note)
@@ -66,7 +66,7 @@ class OfflineBillsTest {
         assertEquals(43_000L,store.getAccount(channel.id)!!.amountCents)
         store.delete(record.id)
         assertEquals(50_000L,store.getAccount(channel.id)!!.amountCents)
-        assertEquals(1,PlatformStatements.apply(store,wx(status="已退款",order="FULL-REFUND-ORDER")).saved)
+        assertEquals(1,PlatformStatements.apply(store,wx(status="已退款",order="FULL-REFUND-ORDER"),selection=PlatformImportAccounts.Selection(mapOf("零钱" to channel.uid),affectsBalance=true)).saved)
         assertEquals(50_000L,store.getAccount(channel.id)!!.amountCents)
     }
 

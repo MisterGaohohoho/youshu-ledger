@@ -49,7 +49,7 @@ object LedgerArchive {
     /** The caller owns output. A complete manifest is written only after all images succeed. */
     fun write(store: LedgerStore, channels: ChannelSettings, output: OutputStream): Summary = synchronized(store) {
         val records = store.all()
-        val ledger = JSONObject(LedgerBackup.encode(records, channels, store.accounts(), store.customCategories(),store.defaultAccount()?.uid,store.channelDefaultAccounts(),AccountTransfers(store).list()))
+        val ledger = JSONObject(LedgerBackup.encode(records, channels, store.accounts(), store.customCategories(),store.defaultAccount()?.uid,store.channelDefaultAccounts(),AccountTransfers(store).list(),PlatformImportAccounts.preferences(store)))
         val reimbursements = ReimbursementStore(store.reimbursementContext, store)
         val reimbursement = reimbursements.backupMetadata()
         ledger.put("reimbursement", reimbursement)

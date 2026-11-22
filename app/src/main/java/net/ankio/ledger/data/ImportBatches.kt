@@ -133,9 +133,11 @@ class ImportBatches(private val store: LedgerStore) {
             db.execSQL("CREATE TABLE IF NOT EXISTS import_batch_items(batch_uid TEXT NOT NULL,record_uid TEXT NOT NULL,record_id INTEGER NOT NULL UNIQUE,fingerprint TEXT NOT NULL,PRIMARY KEY(batch_uid,record_uid))")
             db.execSQL("CREATE INDEX IF NOT EXISTS import_items_batch ON import_batch_items(batch_uid)")
         }
-        private fun snapshots(db: SQLiteDatabase): Map<String, String> = db.rawQuery("SELECT uid,amount,direction,merchant,category,occurred_at,note,account_uid,tags,requires_reimbursement,state,transaction_id,raw_text FROM records", null).use { c ->
+        private fun snapshots(db: SQLiteDatabase): Map<String, String> = db.rawQuery("SELECT uid,amount,direction,merchant,category,occurred_at,note,account_uid,tags,requires_reimbursement,state,transaction_id,raw_text,affects_balance,account_selection_explicit FROM records", null).use { c ->
             buildMap { while(c.moveToNext()) {
-                val values = JSONArray(); for(i in 1 until c.columnCount) values.put(if(c.isNull(i)) JSONObject.NULL else c.getString(i))
+                val values = JSONArray(); for(i in 1 until c.columnCount-2) values.put(if(c.isNull(i)) JSONObject.NULL else c.getString(i))
+                // Preserve fingerprints of v16 batches whose accounting semantics have not changed.
+                if(c.getInt(13)!=1 || c.getInt(14)!=0)values.put("account-settings").put(c.getInt(13)).put(c.getInt(14))
                 val hash = MessageDigest.getInstance("SHA-256").digest(values.toString().toByteArray()).joinToString("") { "%02x".format(it) }
                 put(c.getString(0), hash)
             } }

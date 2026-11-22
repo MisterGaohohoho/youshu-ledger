@@ -217,7 +217,7 @@ class AccountsReferenceDataTest {
             } finally { db.endTransaction() }
         }
         LedgerStore(context,name).use { upgraded ->
-            assertEquals(16,upgraded.readableDatabase.version);assertEquals(records,upgraded.all());assertEquals(accounts,upgraded.accounts())
+            assertEquals(17,upgraded.readableDatabase.version);assertEquals(records,upgraded.all());assertEquals(accounts,upgraded.accounts())
             assertEquals(history,upgraded.captureHistory(linked.id));assertNull(upgraded.get(historical.id)!!.accountUid)
             assertEquals(mapOf("wechat" to a.uid),upgraded.channelDefaultAccounts());assertTrue(AccountTransfers(upgraded).list().isEmpty())
             assertTrue(upgraded.accounts().all { it.includedInAssets })
@@ -231,7 +231,7 @@ class AccountsReferenceDataTest {
         source.saveEdited(bill(amount=200),a.uid,true)
         val saved=AccountTransfers(source).save(AccountTransfer(fromUid=a.uid,toUid=b.uid,amountCents=1000,occurredAt=at+1,note="保留 \\\"\n备注"))
         val json=LedgerBackup.encode(source,ChannelSettings(context))
-        assertEquals(9,JSONObject(json).getInt("version"))
+        assertEquals(10,JSONObject(json).getInt("version"))
         val portable=LedgerBackup.decode(json.byteInputStream())
         assertEquals(listOf(saved),portable.transfers);assertFalse(portable.accounts.single { it.uid==b.uid }.includedInAssets)
         val zip=ByteArrayOutputStream().also { LedgerArchive.write(source,ChannelSettings(context),it) }.toByteArray()

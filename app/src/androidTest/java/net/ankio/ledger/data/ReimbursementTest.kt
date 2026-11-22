@@ -90,7 +90,7 @@ class ReimbursementTest {
         val item=record(System.currentTimeMillis()).copy(tags=listOf("项目A","报销材料"),requiresReimbursement=true)
         val backup=LedgerBackup.encode(listOf(item),ChannelSettings(context))
         fun decode(value:JSONObject)=LedgerBackup.decode(ByteArrayInputStream(value.toString().toByteArray())).records.single()
-        val current=JSONObject(backup);assertEquals(9,current.getInt("version"))
+        val current=JSONObject(backup);assertEquals(10,current.getInt("version"))
         assertEquals(item,decode(current))
         val notRequired=JSONObject(backup);notRequired.getJSONArray("records").getJSONObject(0).put("requiresReimbursement",false)
         assertFalse(decode(notRequired).requiresReimbursement)
@@ -120,7 +120,7 @@ class ReimbursementTest {
         initial.close();LegacyLedgerSchemaFixture.project(context.getDatabasePath(name).path,9)
         val upgraded=LedgerStore(context,name)
         try {
-            assertEquals(16,upgraded.readableDatabase.version)
+            assertEquals(17,upgraded.readableDatabase.version)
             assertEquals(original.copy(requiresReimbursement=true),upgraded.get(original.id))
             assertEquals(similar,upgraded.get(similar.id));assertEquals(history,upgraded.captureHistory(original.id))
             assertEquals(listOf("不报销","报销材料","项目A"),BillReports(upgraded).labels())
@@ -131,7 +131,7 @@ class ReimbursementTest {
         val item=initial.saveEdited(record(System.currentTimeMillis()));val history=initial.captureHistory(item.id);initial.close()
         LegacyLedgerSchemaFixture.project(context.getDatabasePath(name).path,8)
         val upgraded=LedgerStore(context,name)
-        try {assertEquals(item,upgraded.get(item.id));assertEquals(history,upgraded.captureHistory(item.id));assertEquals(16,upgraded.readableDatabase.version)}
+        try {assertEquals(item,upgraded.get(item.id));assertEquals(history,upgraded.captureHistory(item.id));assertEquals(17,upgraded.readableDatabase.version)}
         finally {upgraded.close();context.deleteDatabase(name)}
     }
 }

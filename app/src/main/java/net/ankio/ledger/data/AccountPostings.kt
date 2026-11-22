@@ -19,6 +19,8 @@ internal object AccountPostings {
         }
         add("records","account_uid","TEXT")
         add("records","account_effect","INTEGER NOT NULL DEFAULT 0")
+        add("records","affects_balance","INTEGER NOT NULL DEFAULT 1 CHECK(affects_balance IN (0,1))")
+        add("records","account_selection_explicit","INTEGER NOT NULL DEFAULT 0 CHECK(account_selection_explicit IN (0,1))")
         // Keep the legacy nonnegative base, allowing an overdraft in its signed adjustment.
         add("accounts","balance_adjustment","INTEGER NOT NULL DEFAULT 0")
         add("accounts","included_in_assets","INTEGER NOT NULL DEFAULT 1 CHECK(included_in_assets IN (0,1))")
@@ -56,6 +58,7 @@ internal object AccountPostings {
     }
 
     fun clearDeletedAccount(db:SQLiteDatabase,uid:String) {
+        db.delete("platform_import_accounts","account_uid=?",arrayOf(uid))
         for(column in listOf("default_uid")+channelColumns.values)
             db.update("account_preferences",ContentValues().apply { putNull(column) },"$column=?",arrayOf(uid))
     }
@@ -78,12 +81,12 @@ internal object AccountPostings {
     }
 
     fun synchronize(db:SQLiteDatabase,id:Long,assignDefault:Boolean=false) {
-        val stored=db.rawQuery("SELECT account_uid,account_effect,state,amount,direction,source,origin FROM records WHERE id=?",arrayOf(id.toString())).use {
+        val stored=db.rawQuery("SELECT account_uid,account_effect,state,amount,direction,source,origin,affects_balance,account_selection_explicit FROM records WHERE id=?",arrayOf(id.toString())).use {
             if(!it.moveToFirst())return
-            Entry(if(it.isNull(0))null else it.getString(0),it.getLong(1),it.getString(2),if(it.isNull(3))null else it.getLong(3),if(it.isNull(4))null else it.getString(4),it.getString(5),it.getString(6))
+            Entry(if(it.isNull(0))null else it.getString(0),it.getLong(1),it.getString(2),if(it.isNull(3))null else it.getLong(3),if(it.isNull(4))null else it.getString(4),it.getString(5),it.getString(6),it.getInt(7)==1,it.getInt(8)==1)
         }
         var uid=stored.uid
-        if(uid==null && assignDefault && stored.state==RecordState.POSTED.name) {
+        if(uid==null && assignDefault && !stored.explicit && stored.state==RecordState.POSTED.name) {
             val channel=if(stored.source==Source.MANUAL.name)null else when(stored.origin) {
                 PaymentApps.WECHAT -> "wechat"
                 PaymentApps.ALIPAY -> "alipay"
@@ -93,7 +96,7 @@ internal object AccountPostings {
         }
         val target=uid?.let { account(db,it) }
         val deleted=db.rawQuery("SELECT 1 FROM record_deletions WHERE record_id=?",arrayOf(id.toString())).use { it.moveToFirst() }
-        val effect=if(target!=null && stored.state==RecordState.POSTED.name && !deleted && stored.amount!=null && stored.direction!=null) {
+        val effect=if(target!=null && stored.affectsBalance && stored.state==RecordState.POSTED.name && !deleted && stored.amount!=null && stored.direction!=null) {
             effect(target.second,stored.amount,Direction.valueOf(stored.direction))
         }else 0L
         if(uid!=null)adjust(db,uid,effect-stored.effect)
@@ -103,10 +106,10 @@ internal object AccountPostings {
     /** Net by account first, so an offsetting batch cannot overflow at an intermediate row. */
     fun synchronizeBatch(db:SQLiteDatabase,ids:List<Long>) {
         val deltas=mutableMapOf<String,Long>();val effects=mutableListOf<Pair<Long,Long>>()
-        for(id in ids)db.rawQuery("SELECT account_uid,account_effect,state,amount,direction,EXISTS(SELECT 1 FROM record_deletions d WHERE d.record_id=r.id) FROM records r WHERE id=?",arrayOf(id.toString())).use { c ->
+        for(id in ids)db.rawQuery("SELECT account_uid,account_effect,state,amount,direction,EXISTS(SELECT 1 FROM record_deletions d WHERE d.record_id=r.id),affects_balance FROM records r WHERE id=?",arrayOf(id.toString())).use { c ->
             check(c.moveToFirst()) { "账单已不存在" }
             val uid=if(c.isNull(0))null else c.getString(0);val target=uid?.let { account(db,it) }
-            val next=if(target!=null && c.getString(2)=="POSTED" && !c.isNull(3) && !c.isNull(4) && c.getInt(5)==0)
+            val next=if(target!=null && c.getString(2)=="POSTED" && !c.isNull(3) && !c.isNull(4) && c.getInt(5)==0 && c.getInt(6)==1)
                 effect(target.second,c.getLong(3),Direction.valueOf(c.getString(4))) else 0L
             if(uid!=null)deltas[uid]=Math.addExact(deltas[uid]?:0L,next-c.getLong(1))
             effects+=id to next
@@ -117,6 +120,7 @@ internal object AccountPostings {
 
     fun select(db:SQLiteDatabase,id:Long,uid:String?) {
         require(uid==null || account(db,uid)!=null) { "账户已不存在，请重新选择" }
+        db.execSQL("UPDATE records SET account_selection_explicit=1 WHERE id=?",arrayOf(id))
         val unchanged=db.rawQuery("SELECT account_uid FROM records WHERE id=?",arrayOf(id.toString())).use {
             it.moveToFirst() && (if(it.isNull(0))null else it.getString(0))==uid
         }
@@ -133,5 +137,6 @@ internal object AccountPostings {
         db.update("records",ContentValues().apply { put("account_effect",0) },"id=?",arrayOf(id.toString()))
     }
 
-    private data class Entry(val uid:String?,val effect:Long,val state:String,val amount:Long?,val direction:String?,val source:String,val origin:String)
+    private data class Entry(val uid:String?,val effect:Long,val state:String,val amount:Long?,val direction:String?,val source:String,val origin:String,
+                             val affectsBalance:Boolean,val explicit:Boolean)
 }

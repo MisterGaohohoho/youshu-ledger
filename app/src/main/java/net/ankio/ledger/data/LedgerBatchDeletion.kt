@@ -48,7 +48,7 @@ class LedgerBatchDeletion(private val store:LedgerStore) {
             val id=array.getLong(index);require(id in 1..9_007_199_254_740_991L);add(id)
         } }
         if(!all && ids.isEmpty())return emptyList()
-        return store.readableDatabase.rawQuery("SELECT r.id,r.amount,r.direction,r.state,r.uid,r.merchant,r.category,r.occurred_at,r.note,r.account_uid,r.account_effect,r.requires_reimbursement,r.tags,r.transaction_id FROM records r WHERE ($where) AND r.state IN ('POSTED','REVIEW') ORDER BY r.id",args.toTypedArray()).use { c ->
+        return store.readableDatabase.rawQuery("SELECT r.id,r.amount,r.direction,r.state,r.uid,r.merchant,r.category,r.occurred_at,r.note,r.account_uid,r.account_effect,r.requires_reimbursement,r.tags,r.transaction_id,r.affects_balance,r.account_selection_explicit FROM records r WHERE ($where) AND r.state IN ('POSTED','REVIEW') ORDER BY r.id",args.toTypedArray()).use { c ->
             buildList { while(c.moveToNext()) {
                 val id=c.getLong(0)
                 if(if(all)id !in ids else id in ids)add(Row(id,if(c.isNull(1))0 else c.getLong(1),c.getString(2).orEmpty(),c.getString(3),

@@ -71,7 +71,7 @@ class NativeV2DataTest {
             db.version = 1
         }
         assertEquals(listOf(original), store.all())
-        assertEquals(16,store.readableDatabase.version)
+        assertEquals(17,store.readableDatabase.version)
         assertTrue(store.accounts().isEmpty())
         assertTrue(store.customCategories().isEmpty())
         store.readableDatabase.rawQuery("SELECT received_at FROM capture_events WHERE event_key = ?",
@@ -103,7 +103,7 @@ class NativeV2DataTest {
         assertEquals(bill, store.get(bill.id))
         assertEquals(account, store.getAccount(account.id))
         assertEquals(listOf(category), store.customCategories())
-        assertEquals(16,store.readableDatabase.version)
+        assertEquals(17,store.readableDatabase.version)
         assertTrue(store.screenshotIds().isEmpty())
     }
 
@@ -159,7 +159,7 @@ class NativeV2DataTest {
         store.addCategory(expense); store.addCategory(income)
         channels.set(ChannelSettings.Channel.OCR, true)
         val encoded = LedgerBackup.encode(store, channels)
-        assertEquals(9, JSONObject(encoded).getInt("version"))
+        assertEquals(10, JSONObject(encoded).getInt("version"))
         val backup = decode(encoded)
         assertEquals(setOf(posted.copy(id = 0), pending.copy(id = 0)), backup.records.toSet())
         assertEquals(setOf(asset.copy(id = 0), debt.copy(id = 0)), backup.accounts.toSet())

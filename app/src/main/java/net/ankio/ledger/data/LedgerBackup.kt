@@ -13,7 +13,8 @@ data class ValidatedBackup(val records: List<LedgerRecord>, val channels: Map<Ch
     val histories:Map<String,List<RestoredCaptureHistory>> = emptyMap(),
     val reimbursement: JSONObject? = null, val defaultAccountUid:String? = null,
     val channelDefaultAccounts:Map<String,String> = emptyMap(),
-    val transfers:List<AccountTransfer> = emptyList(), val importBatches:JSONArray = JSONArray())
+    val transfers:List<AccountTransfer> = emptyList(), val importBatches:JSONArray = JSONArray(),
+    val importAccountPreferences:List<PlatformImportAccounts.Preference> = emptyList())
 
 object LedgerBackup {
     const val MAX_BYTES = 16 * 1024 * 1024
@@ -55,7 +56,7 @@ object LedgerBackup {
     }
     fun encode(store: LedgerStore, channels: ChannelSettings): String = synchronized(store) {
         val records=store.all()
-        val root=JSONObject(encode(records, channels, store.accounts(), store.customCategories(),store.defaultAccount()?.uid,store.channelDefaultAccounts(),AccountTransfers(store).list()))
+        val root=JSONObject(encode(records, channels, store.accounts(), store.customCategories(),store.defaultAccount()?.uid,store.channelDefaultAccounts(),AccountTransfers(store).list(),PlatformImportAccounts.preferences(store)))
         val histories=JSONObject()
         val grouped=store.captureHistories()
         var imageBytes=0L
@@ -83,6 +84,7 @@ object LedgerBackup {
         backup.histories[record.uid]?.let { store.restoreHistory(record.id,it) }
     }):Int=synchronized(store) {
         validateChannelDefaults(backup.channelDefaultAccounts,backup.accounts)
+        PlatformImportAccounts.validatePreferences(backup.importAccountPreferences,backup.accounts)
         val old=store.activeRecordIdsByUid()
         val priorUids=ImportBatches(store).before().keys
         val hadAccounts=store.accounts().isNotEmpty()
@@ -95,6 +97,9 @@ object LedgerBackup {
             if(!hadAccounts) {
                 if(backup.defaultAccountUid!=null)store.setDefaultAccount(backup.defaultAccountUid)
                 backup.channelDefaultAccounts.forEach { (channel,uid)->store.setChannelDefaultAccount(channel,uid) }
+                backup.importAccountPreferences.groupBy { it.platform }.forEach { (platform,values)->
+                    PlatformImportAccounts.remember(store,platform,values.associate { it.method to it.accountUid })
+                }
             }
             for((uid,id) in store.activeRecordIdsByUid())if(uid !in old)restoreMedia(requireNotNull(store.get(id)))
             backup.reimbursement?.let { ReimbursementStore(store.reimbursementContext,store).restoreMetadata(it,originalFiles,createdOriginals) }
@@ -121,8 +126,10 @@ object LedgerBackup {
 
     fun encode(records: List<LedgerRecord>, channels: ChannelSettings,
                accounts: List<LedgerAccount> = emptyList(), categories: List<CustomCategory> = emptyList(), defaultAccountUid:String? = null,
-               channelDefaultAccounts:Map<String,String> = emptyMap(), transfers:List<AccountTransfer> = emptyList()): String {
+               channelDefaultAccounts:Map<String,String> = emptyMap(), transfers:List<AccountTransfer> = emptyList(),
+               importAccountPreferences:List<PlatformImportAccounts.Preference> = emptyList()): String {
         validateChannelDefaults(channelDefaultAccounts,accounts)
+        PlatformImportAccounts.validatePreferences(importAccountPreferences,accounts)
         val settings = JSONObject()
         ChannelSettings.Channel.entries.forEach { settings.put(it.key, channels.enabled(it)) }
         val array = JSONArray()
@@ -138,6 +145,7 @@ object LedgerBackup {
             put("note", r.note);put("tags",JSONArray(BillTags.encode(r.tags)));put("requiresReimbursement",r.requiresReimbursement)
             put("identities",JSONArray(TransactionIdentities.encode(r.identities)))
             put("accountUid",r.accountUid ?: JSONObject.NULL);put("accountEffect",r.accountEffect)
+            put("affectsBalance",r.affectsBalance);put("accountSelectionExplicit",r.accountSelectionExplicit)
             r.bill.refund?.let { refund -> put("refund",JSONObject().put("provider",refund.provider)
                 .put("originalAmountCents",refund.originalAmountCents).put("refundedCents",refund.refundedCents)
                 .put("mode",refund.mode).put("refundId",refund.refundId?:JSONObject.NULL)) }
@@ -167,10 +175,11 @@ object LedgerBackup {
                 .put("fromEffect",AccountTransfers.effect(from.type,value.amountCents,true))
                 .put("toEffect",AccountTransfers.effect(to.type,value.amountCents,false)))
         }
-        return JSONObject().put("format", "simple-ledger").put("version", 9)
+        return JSONObject().put("format", "simple-ledger").put("version", 10)
             .put("channels", settings).put("records", array).put("accounts", accountArray)
             .put("customCategories", custom).put("defaultAccountUid",defaultAccountUid?:JSONObject.NULL)
-            .put("channelDefaultAccounts",JSONObject(channelDefaultAccounts)).put("transfers",transferArray).toString(2)
+            .put("channelDefaultAccounts",JSONObject(channelDefaultAccounts)).put("transfers",transferArray)
+            .put("importAccountPreferences",PlatformImportAccounts.encode(importAccountPreferences)).toString(2)
     }
 
     private fun validateChannelDefaults(defaults:Map<String,String>,accounts:List<LedgerAccount>) {
@@ -196,7 +205,7 @@ object LedgerBackup {
     /** Reuse the legacy schema validation for ZIP metadata, whose image bytes live separately. */
     internal fun decodeMetadata(root: JSONObject): ValidatedBackup {
         val version = root.get("version")
-        require(root.get("format") == "simple-ledger" && version is Int && version in 1..9) { "备份格式或版本不支持" }
+        require(root.get("format") == "simple-ledger" && version is Int && version in 1..10) { "备份格式或版本不支持" }
         val array = root.getJSONArray("records")
         require(array.length() <= 100_000) { "备份记录过多" }
         val uids = mutableSetOf<String>()
@@ -238,7 +247,9 @@ object LedgerBackup {
                 state = state, reason = text("reason"), note = text("note", 500), tags=tags-BillTags.LEGACY_REIMBURSEMENT,requiresReimbursement=reimbursement,
                 identities=obj.optJSONArray("identities")?.let { TransactionIdentities.decode(it.toString()) } ?: emptyList(),
                 accountUid=if(version>=6 && !obj.isNull("accountUid"))text("accountUid",36) else null,
-                accountEffect=if(version>=6)integer("accountEffect").also { require(it in -Money.MAX_CENTS..Money.MAX_CENTS) } else 0)
+                accountEffect=if(version>=6)integer("accountEffect").also { require(it in -Money.MAX_CENTS..Money.MAX_CENTS) } else 0,
+                affectsBalance=if(version>=10)bool("affectsBalance") else true,
+                accountSelectionExplicit=if(version>=10)bool("accountSelectionExplicit") else false)
         }
         val settings = root.getJSONObject("channels")
         val channels = ChannelSettings.Channel.entries.associateWith { channel ->
@@ -296,7 +307,7 @@ object LedgerBackup {
         for(record in records) {
             val account=record.accountUid?.let { uid->accountsByUid[uid] ?: error("关联账户不存在") }
             val signed=if(record.bill.direction==Direction.EXPENSE)-(record.bill.amountCents?:0) else record.bill.amountCents?:0
-            val expected=if(record.state!=RecordState.POSTED || account==null)0L else if(account.type==AccountType.LIABILITY)-signed else signed
+            val expected=if(!record.affectsBalance || record.state!=RecordState.POSTED || account==null)0L else if(account.type==AccountType.LIABILITY)-signed else signed
             require(record.accountEffect==expected) { "账户余额关联不一致" }
         }
         val categories = if (version == 1) emptyList() else {
@@ -344,6 +355,7 @@ object LedgerBackup {
         }
         val reimbursement=if(root.has("reimbursement"))ReimbursementStore.validateBackup(root.getJSONObject("reimbursement"),records) else null
         return ValidatedBackup(records, channels, accounts, categories,histories,reimbursement,defaultAccountUid,channelDefaultAccounts,transfers,
-            if(root.has("importBatches"))ImportBatches.validate(root.getJSONArray("importBatches"),records) else JSONArray())
+            if(root.has("importBatches"))ImportBatches.validate(root.getJSONArray("importBatches"),records) else JSONArray(),
+            if(version>=10)PlatformImportAccounts.decode(root.getJSONArray("importAccountPreferences"),accounts) else emptyList())
     }
 }

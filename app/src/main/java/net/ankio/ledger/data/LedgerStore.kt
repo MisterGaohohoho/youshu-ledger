@@ -25,10 +25,15 @@ data class LedgerRecord(
     val requiresReimbursement: Boolean = false,
     val accountUid: String? = null,
     val accountEffect: Long = 0,
+    val affectsBalance: Boolean = true,
+    val accountSelectionExplicit: Boolean = false,
 ) {
     fun existing() = ExistingBill(id, capture.source, capture.origin, capture.text,
         bill.amountCents, bill.direction, bill.merchant, bill.occurredAt, bill.transactionId, bill.timeExplicit)
 }
+
+/** Applies only when ingestion creates a record; duplicates retain their original accounting. */
+data class RecordAccountSelection(val uid: String?, val affectsBalance: Boolean)
 
 sealed class IngestResult {
     data class Saved(val record: LedgerRecord, val updated: Boolean = false, val supplemented: Boolean = false) : IngestResult()
@@ -39,7 +44,7 @@ sealed class IngestResult {
 
 data class DeletedRecord(val id:Long,val expiresAt:Long,val batchId:String?=null,val count:Int=1)
 
-class LedgerStore(context: Context, private val name: String = "ledger.db", private val screenshots: ScreenshotStore = ScreenshotStore.get(context)) : SQLiteOpenHelper(context, name, null, 16) {
+class LedgerStore(context: Context, private val name: String = "ledger.db", private val screenshots: ScreenshotStore = ScreenshotStore.get(context)) : SQLiteOpenHelper(context, name, null, 17) {
     internal val reimbursementContext: Context = context.applicationContext
     internal val reimbursementDirectory = java.io.File(context.filesDir, "reimbursement-originals/" + UUID.nameUUIDFromBytes(name.toByteArray()).toString())
     private fun imageOwner(id: Long) = "ledger:$name:$id"
@@ -84,13 +89,15 @@ class LedgerStore(context: Context, private val name: String = "ledger.db", priv
         ImportBatches.create(db)
         ReimbursementStore.createSchema(db)
         AccountPostings.create(db)
+        PlatformImportAccounts.create(db)
         AccountTransfers.createSchema(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if(oldVersion<13)upgradeLegacy(db,oldVersion,13)
-        check(oldVersion in 1..15 && newVersion==16) { "Unsupported database migration $oldVersion → $newVersion" }
+        check(oldVersion in 1..16 && newVersion==17) { "Unsupported database migration $oldVersion → $newVersion" }
         AccountPostings.create(db)
+        PlatformImportAccounts.create(db)
         AccountTransfers.createSchema(db)
         createBatchDeletionSchema(db)
         ImportBatches.create(db)
@@ -313,12 +320,14 @@ class LedgerStore(context: Context, private val name: String = "ledger.db", priv
     }
 
     @Synchronized
-    fun ingest(capture: Capture, bill: ParsedBill, eventKey: String? = null, screenshot: ByteArray? = null, merchantIcon: ByteArray? = null, requireReview: Boolean = false): IngestResult {
+    fun ingest(capture: Capture, bill: ParsedBill, eventKey: String? = null, screenshot: ByteArray? = null, merchantIcon: ByteArray? = null, requireReview: Boolean = false,
+               accountSelection: RecordAccountSelection? = null): IngestResult {
         require(screenshot == null || screenshot.isNotEmpty() && screenshot.size <= 5 * 1024 * 1024) { "Invalid screenshot size" }
         require(merchantIcon == null || merchantIcon.isNotEmpty() && merchantIcon.size <= 128 * 1024) { "Invalid icon size" }
         val db = writableDatabase
         db.beginTransaction()
         try {
+            require(accountSelection?.uid == null || AccountPostings.account(db,accountSelection.uid)!=null) { "关联账户已不存在，请重新选择" }
             val incomingIdentities=TransactionIdentities.from(capture,bill)
             val primaryIssuerConflict=primaryIssuerConflictsWithCapture(capture,bill)
             val recentlyDeleted=db.rawQuery("SELECT r.* FROM records r JOIN record_deletions d ON d.record_id=r.id",null).use { c->
@@ -338,7 +347,7 @@ class LedgerStore(context: Context, private val name: String = "ledger.db", priv
                 db.delete("capture_events", "received_at < ?", arrayOf((capture.receivedAt - 7 * 86_400_000L).toString()))
             }
             if (bill.refund != null) {
-                val result = ingestRefund(db, capture, bill, screenshot, requireReview, merchantIcon)
+                val result = ingestRefund(db, capture, bill, screenshot, requireReview, merchantIcon, accountSelection)
                 db.setTransactionSuccessful()
                 return result
             }
@@ -460,7 +469,8 @@ class LedgerStore(context: Context, private val name: String = "ledger.db", priv
                 state = if (!requireReview && bill.reliable && bill.amountCents != null && bill.direction != null && possible == null)
                     RecordState.POSTED else RecordState.REVIEW,
                 reason = reason,
-                duplicateId = possible?.id)
+                duplicateId = possible?.id, accountUid=accountSelection?.uid,
+                affectsBalance=accountSelection?.affectsBalance ?: true, accountSelectionExplicit=accountSelection!=null)
             val id = db.insertOrThrow("records", null, values(record))
             AccountPostings.synchronize(db,id,assignDefault=true)
             persistIdentities(db,id,identities(record))
@@ -611,7 +621,10 @@ class LedgerStore(context: Context, private val name: String = "ledger.db", priv
         val provenance=previous?.takeIf { isAutomaticPayment(it) && it.bill.amountCents==record.bill.amountCents &&
             it.bill.direction==record.bill.direction && it.bill.merchant==record.bill.merchant &&
             it.bill.occurredAt==record.bill.occurredAt && it.bill.timeExplicit==record.bill.timeExplicit }?.reason.orEmpty()
-        val posted = record.copy(accountEffect=previous?.accountEffect ?: 0,identities=previous?.identities ?: record.identities,bill = record.bill.copy(reliable = true, reason = provenance),
+        val posted = record.copy(accountEffect=previous?.accountEffect ?: 0,
+            affectsBalance=previous?.affectsBalance ?: record.affectsBalance,
+            accountSelectionExplicit=previous?.accountSelectionExplicit ?: record.accountSelectionExplicit,
+            identities=previous?.identities ?: record.identities,bill = record.bill.copy(reliable = true, reason = provenance),
             state = RecordState.POSTED, reason = provenance, duplicateId = null)
         val db = writableDatabase
         db.beginTransaction()
@@ -894,7 +907,8 @@ class LedgerStore(context: Context, private val name: String = "ledger.db", priv
         } finally { db.endTransaction() }
     }
 
-    private fun ingestRefund(db:SQLiteDatabase,capture:Capture,bill:ParsedBill,image:ByteArray?,requireReview:Boolean,merchantIcon:ByteArray?=null):IngestResult {
+    private fun ingestRefund(db:SQLiteDatabase,capture:Capture,bill:ParsedBill,image:ByteArray?,requireReview:Boolean,merchantIcon:ByteArray?=null,
+                             accountSelection:RecordAccountSelection?=null):IngestResult {
         val refund=requireNotNull(bill.refund)
         val exact=if(!bill.transactionId.isNullOrBlank())postedRefundIdentityCandidates(bill).filter {
             compatibleRefund(it,bill) && refundIdentityMatches(it,bill)
@@ -914,7 +928,7 @@ class LedgerStore(context: Context, private val name: String = "ledger.db", priv
             it.state==RecordState.POSTED && refundIdentityMatches(it,bill)
         }
         if(!requireReview && canCreateNetRefund(capture,bill))
-            return insertNetRefund(db,capture,bill,image,merchantIcon)
+            return insertNetRefund(db,capture,bill,image,merchantIcon,accountSelection)
         val reason=when {
             !validRefundEvidence(bill) -> "退款金额或口径不完整，请重新识别成功退款详情"
             providerConflict -> "退款平台与截图来源冲突，请重新识别"
@@ -925,7 +939,8 @@ class LedgerStore(context: Context, private val name: String = "ledger.db", priv
             refund.mode=="single" -> "只有单次退款信息，暂无法确定最终支出，请打开完整付款详情重新识别"
             else -> "付款与退款信息不完整，请打开完整付款详情重新识别"
         }
-        val pending=LedgerRecord(capture=capture,bill=bill.copy(reason=reason),state=RecordState.REVIEW,reason=reason)
+        val pending=LedgerRecord(capture=capture,bill=bill.copy(reason=reason),state=RecordState.REVIEW,reason=reason,
+            accountUid=accountSelection?.uid,affectsBalance=accountSelection?.affectsBalance ?: true,accountSelectionExplicit=accountSelection!=null)
         val id=db.insertOrThrow("records",null,values(pending))
         persistIdentities(db,id,identities(pending))
         image?.let {
@@ -944,10 +959,12 @@ class LedgerStore(context: Context, private val name: String = "ledger.db", priv
             postedRefundIdentityCandidates(bill).none { it.state==RecordState.POSTED && refundIdentityMatches(it,bill) }
     }
 
-    private fun insertNetRefund(db:SQLiteDatabase,capture:Capture,bill:ParsedBill,image:ByteArray?,merchantIcon:ByteArray?):IngestResult.Saved {
+    private fun insertNetRefund(db:SQLiteDatabase,capture:Capture,bill:ParsedBill,image:ByteArray?,merchantIcon:ByteArray?,
+                                accountSelection:RecordAccountSelection?=null):IngestResult.Saved {
         val refund=requireNotNull(bill.refund)
         require(refund.mode=="cumulative" && validRefundSummary(bill))
-        val record=LedgerRecord(capture=capture,bill=bill.copy(reason=""),state=RecordState.POSTED,reason="")
+        val record=LedgerRecord(capture=capture,bill=bill.copy(reason=""),state=RecordState.POSTED,reason="",
+            accountUid=accountSelection?.uid,affectsBalance=accountSelection?.affectsBalance ?: true,accountSelectionExplicit=accountSelection!=null)
         val id=db.insertOrThrow("records",null,values(record))
         AccountPostings.synchronize(db,id,assignDefault=true)
         persistIdentities(db,id,identities(record))
@@ -1322,7 +1339,7 @@ class LedgerStore(context: Context, private val name: String = "ledger.db", priv
                     val appliesToExisting=record.accountUid in existingAccounts
                     val amount=record.bill.amountCents
                     val direction=record.bill.direction
-                    val effect=if(appliesToExisting && record.state==RecordState.POSTED && amount!=null && direction!=null)
+                    val effect=if(appliesToExisting && record.affectsBalance && record.state==RecordState.POSTED && amount!=null && direction!=null)
                         AccountPostings.effect(requireNotNull(AccountPostings.account(db,requireNotNull(record.accountUid))).second,
                             amount,direction) else 0L
                     val restored=record.copy(id=0,duplicateId=null,accountEffect=if(appliesToExisting)effect else record.accountEffect)
@@ -1391,6 +1408,7 @@ class LedgerStore(context: Context, private val name: String = "ledger.db", priv
         put("note", r.note);put("tags",BillTags.toStorage(r.tags))
         put("requires_reimbursement",if(r.requiresReimbursement)1 else 0)
         put("account_uid",r.accountUid);put("account_effect",r.accountEffect)
+        put("affects_balance",if(r.affectsBalance)1 else 0);put("account_selection_explicit",if(r.accountSelectionExplicit)1 else 0)
         put("transaction_identities",TransactionIdentities.encode(identities(r)))
         put("refund_provider", r.bill.refund?.provider);put("refund_original", r.bill.refund?.originalAmountCents)
         put("refund_amount", r.bill.refund?.refundedCents);put("refund_mode",r.bill.refund?.mode);put("refund_id",r.bill.refund?.refundId)
@@ -1408,6 +1426,8 @@ class LedgerStore(context: Context, private val name: String = "ledger.db", priv
                 number("reliable") == 1L, text("reason"), number("time_explicit") == 1L,
                 optionalText("refund_provider")?.let { RefundInfo(it,number("refund_original"),number("refund_amount"),text("refund_mode"),optionalText("refund_id")) }),
             RecordState.valueOf(text("state")), text("reason"), optionalNumber("duplicate_id"), text("note"),
-            TransactionIdentities.decode(text("transaction_identities")),BillTags.fromStorage(text("tags")),number("requires_reimbursement")==1L,if(c.getColumnIndex("account_uid")>=0)optionalText("account_uid") else null,if(c.getColumnIndex("account_effect")>=0)number("account_effect") else 0)
+            TransactionIdentities.decode(text("transaction_identities")),BillTags.fromStorage(text("tags")),number("requires_reimbursement")==1L,if(c.getColumnIndex("account_uid")>=0)optionalText("account_uid") else null,if(c.getColumnIndex("account_effect")>=0)number("account_effect") else 0,
+            affectsBalance=c.getColumnIndex("affects_balance")<0 || number("affects_balance")==1L,
+            accountSelectionExplicit=c.getColumnIndex("account_selection_explicit")>=0 && number("account_selection_explicit")==1L)
     }
 }
