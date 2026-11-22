@@ -125,7 +125,7 @@ class ImportBatchesTest {
         store.writableDatabase.version=15;store.close()
         val name=stores.last().first
         LedgerStore(context,name).use { reopened ->
-            assertEquals(16,reopened.readableDatabase.version);assertEquals(1,reopened.all().size)
+            assertEquals(17,reopened.readableDatabase.version);assertEquals(1,reopened.all().size)
             assertEquals(0,ImportBatches(reopened).list(0).getJSONArray("items").length())
         }
     }

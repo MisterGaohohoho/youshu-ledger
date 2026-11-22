@@ -48,7 +48,8 @@ const RecordExperience=(()=>{
    const time=document.createElement('div');time.className='reference-field';time.innerHTML=`<span>${line('clock')}交易时间</span>`;move($('time-label'),time);move($('occurred-at'),time);
    const note=document.querySelector('#import .note-row');
    const reimbursement=$('bill-reimbursement-editor');
-   fields.append(account,category,time);move(reimbursement,fields);move(note,fields);
+   const balanceNote=document.createElement('p');balanceNote.id='record-balance-note';balanceNote.className='sheet-copy';balanceNote.hidden=true;balanceNote.textContent='此账单仅关联账户，不增减余额；修改、退款或删除时也保留此设置。';
+   fields.append(account,balanceNote,category,time);move(reimbursement,fields);move(note,fields);
    document.querySelector('#import .confirm-card').after(fields);
    $('record-account').onclick=()=>AccountExperience.choose($('direction').dataset.value==='INCOME'?'选择存入账户':'选择支出账户',draft.accountUid,uid=>{draft.accountUid=uid;draft.accountSelectionSpecified=true;render();remember()});
    const toggle=document.createElement('button');toggle.id='record-reimbursement-switch';toggle.type='button';toggle.className='reference-switch';toggle.setAttribute('role','switch');toggle.setAttribute('aria-label','标记为待报销');toggle.onclick=()=>{const yes=$('reimbursement-yes').getAttribute('aria-pressed')!=='true';document.querySelectorAll('#bill-reimbursement-editor [data-reimbursement]').forEach(b=>b.setAttribute('aria-pressed',String((b.dataset.reimbursement==='true')===yes)));render();remember()};reimbursement.append(toggle);
@@ -60,6 +61,7 @@ const RecordExperience=(()=>{
    $('record-original').onclick=()=>{const first=(draft.history||[]).find(h=>h.hasScreenshot)||(draft.history||[])[0];if(first){viewHistory(first.sequence);return}if(previewUrl){viewOrPickImage();return}const originals=$('record-originals');originals.hidden=!originals.hidden;$('record-original').setAttribute('aria-expanded',String(!originals.hidden))};
   }
   const a=accounts.find(a=>a.uid===draft.accountUid);
+  $('record-balance-note').hidden=draft.affectsBalance!==false;
   const income=$('direction').dataset.value==='INCOME',isDefault=a&&(a.isDefault||a.isWechatDefault&&draft.paymentProvider==='wechat'||a.isAlipayDefault&&draft.paymentProvider==='alipay');
   $('record-attachment').hidden=income;
   const symbol=a?.kind==='wechat'?'<i class="fa-brands fa-weixin record-wechat" aria-hidden="true"></i>':a?AccountExperience.symbol(a):line('card');

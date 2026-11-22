@@ -133,7 +133,7 @@ class ChannelDefaultAccountTest {
             } finally { db.endTransaction() }
         }
         LedgerStore(context,name).use { upgraded ->
-            assertEquals(16,upgraded.readableDatabase.version)
+            assertEquals(17,upgraded.readableDatabase.version)
             assertEquals(beforeAccounts,upgraded.accounts());assertEquals(record,upgraded.get(record.id))
             assertEquals(beforeHistory,upgraded.captureHistory(record.id))
             assertEquals(selected.uid,upgraded.defaultAccount()!!.uid);assertTrue(upgraded.channelDefaultAccounts().isEmpty())
@@ -150,7 +150,7 @@ class ChannelDefaultAccountTest {
         source.setDefaultAccount(global.uid);source.setChannelDefaultAccount("wechat",bank.uid);source.setChannelDefaultAccount("alipay",global.uid)
         source.saveEdited(bill())
         val encoded=LedgerBackup.encode(source,ChannelSettings(context));val backup=decode(encoded)
-        assertEquals(9,JSONObject(encoded).getInt("version"));assertEquals(source.channelDefaultAccounts(),backup.channelDefaultAccounts)
+        assertEquals(10,JSONObject(encoded).getInt("version"));assertEquals(source.channelDefaultAccounts(),backup.channelDefaultAccounts)
         withStore { target,_,_ ->
             assertEquals(1,LedgerBackup.restore(target,backup));assertEquals(0,LedgerBackup.restore(target,backup))
             assertEquals(source.channelDefaultAccounts(),target.channelDefaultAccounts());assertEquals(global.uid,target.defaultAccount()!!.uid)

@@ -203,7 +203,7 @@ class AccountPostingTest {
             } finally {db.endTransaction()}
         }
         LedgerStore(context,name).use { upgraded ->
-            assertEquals(16,upgraded.readableDatabase.version)
+            assertEquals(17,upgraded.readableDatabase.version)
             assertEquals(account,upgraded.getAccount(account.id));assertEquals(historical,upgraded.get(historical.id))
             upgraded.saveEdited(historical.copy(note="迁移后备注"))
             assertEquals(10000L,upgraded.getAccount(account.id)!!.amountCents)

@@ -294,6 +294,7 @@ class LedgerWebBridge(private val activity: MainActivity) {
             .put("refundCandidateCount",if(record.bill.refund!=null&&record.state==RecordState.REVIEW)app.store.refundCandidates(id).size else 0)
             .put("merchant",record.bill.merchant).put("category",record.bill.category)
             .put("requiresReimbursement",record.requiresReimbursement).put("accountUid",record.accountUid?:JSONObject.NULL)
+            .put("affectsBalance",record.affectsBalance)
             .put("tags",JSONArray(BillTags.encode(record.tags))).put("note",record.note).put("amountCents",record.bill.amountCents?:JSONObject.NULL).put("direction",record.bill.direction?.name?:JSONObject.NULL)
             .put("occurredAt",record.bill.occurredAt).put("state",record.state.name).put("source",record.capture.source.name)
             .put("paymentProvider",paymentProvider(record.capture)?:JSONObject.NULL)

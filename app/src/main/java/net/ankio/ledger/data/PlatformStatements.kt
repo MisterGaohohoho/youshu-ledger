@@ -17,12 +17,12 @@ import java.util.zip.ZipInputStream
 
 /** Official statement files are parsed locally. Import reuses the ledger's identity/refund engine. */
 object PlatformStatements {
-    data class Entry(val capture: Capture, val bill: ParsedBill, val note: String)
+    data class Entry(val capture: Capture, val bill: ParsedBill, val note: String, val paymentMethod:String="")
     data class Document(val platform: String, val entries: List<Entry>, val skipped: Int, val errors: List<String>)
     data class Result(val saved: Int, val updated: Int, val duplicates: Int, val review: Int)
     private data class Row(val line: Int, val at: Long, val amount: Long, val direction: Direction?, val merchant: String,
                            val category: String, val order: String?, val merchantOrder: String?, val note: String,
-                           val refundRow: Boolean, val refunded: Long)
+                           val refundRow: Boolean, val refunded: Long, val paymentMethod:String)
 
     private fun readLimited(input: InputStream, limit: Int): ByteArray {
         val out=ByteArrayOutputStream();val buffer=ByteArray(8192)
@@ -84,7 +84,8 @@ object PlatformStatements {
                 require(refunded<=amount){"退款超过原付款金额"}
                 require(merchant.length<=1024 && category.length<=1024){"商户或分类过长"}
                 parsed+=Row(line,at,amount,direction,merchant,category,order(field("交易单号","交易订单号")),order(field("商户单号","商家订单号")),
-                    listOf(description,field("备注")).filter { it.isNotBlank() && it!="/" }.joinToString("；").take(500),refundRow,refunded)
+                    listOf(description,field("备注")).filter { it.isNotBlank() && it!="/" }.joinToString("；").take(500),refundRow,refunded,
+                    PlatformImportAccounts.methodKey(field("支付方式","收/付款方式")))
             } catch(error:Exception){errors+="第 $line 行：${error.message ?: "数据无效"}"}
         }
         val consumed=mutableSetOf<Row>();val entries=mutableListOf<Entry>();val occurrences=mutableMapOf<String,Int>()
@@ -106,36 +107,39 @@ object PlatformStatements {
             val capture=Capture(Source.MANUAL,origin,"账单文件导入：$hash:$occurrence\n${row.note}")
             val bill=ParsedBill(row.amount-refunded,row.direction,row.merchant,row.category,row.at,row.order,true,"",true,
                 if(refunded>0 && row.direction==Direction.EXPENSE)RefundInfo(platform,row.amount,refunded) else null)
-            entries+=Entry(capture,bill,row.note)
+            // Keep the existing capture fingerprint stable when adding payment-method metadata.
+            entries+=Entry(capture,bill,row.note,row.paymentMethod)
         }
         refunds.filterNot { it in consumed }.forEach { errors+="第 ${it.line} 行：退款未找到唯一原支出，请包含原支出一起导入" }
         return Document(platform,entries,skipped,errors)
     }
 
-    fun apply(store:LedgerStore,document:Document,fileName:String="账单文件"):Result=synchronized(store) {
+    fun apply(store:LedgerStore,document:Document,fileName:String="账单文件",selection:PlatformImportAccounts.Selection?=null):Result=synchronized(store) {
         val db=store.writableDatabase;db.beginTransaction()
         try {
+            val chosen=selection ?: PlatformImportAccounts.defaults(PlatformImportAccounts.preview(store,document))
+            PlatformImportAccounts.validateSelection(store,document,chosen)
             val batches=ImportBatches(store);val before=batches.before()
             val existing=store.all()
             val known=existing.mapTo(mutableSetOf()){it.capture.text}
             val ids=existing.mapTo(mutableSetOf()){it.id};var saved=0;var updated=0;var duplicate=0;var review=0
             for(entry in document.entries) {
                 if(entry.capture.text in known){duplicate++;continue}
-                when(val result=store.ingest(entry.capture,entry.bill)) {
+                val account=RecordAccountSelection(chosen.accountsByMethod[PlatformImportAccounts.methodKey(entry.paymentMethod)],chosen.affectsBalance)
+                when(val result=store.ingest(entry.capture,entry.bill,accountSelection=account)) {
                     is IngestResult.Saved -> {
                         val created=ids.add(result.record.id)
                         if(created){if(result.record.state==RecordState.REVIEW)review++ else saved++}
                         else if(result.updated)updated++ else duplicate++
-                        // Explicitly choose a channel account for imports, including net refunds.
-                        // Ordinary manual entries retain the ledger's global-default semantics.
-                        if(created && result.record.state==RecordState.POSTED)
-                            store.saveEdited(result.record.copy(note=entry.note),store.defaultAccount(document.platform)?.uid,true)
+                        // Notes and selection also belong to review drafts, without posting them.
+                        if(created)db.update("records",android.content.ContentValues().apply { put("note",entry.note) },"id=?",arrayOf(result.record.id.toString()))
                         known+=entry.capture.text
                     }
                     else -> duplicate++
                 }
             }
             batches.finish(before,fileName,if(document.platform=="wechat")"微信" else "支付宝",duplicate,document.errors.size+document.skipped,document.entries.map { it.bill.occurredAt })
+            if(chosen.remember)PlatformImportAccounts.remember(store,document.platform,chosen.accountsByMethod)
             db.setTransactionSuccessful();Result(saved,updated,duplicate,review)
         } finally { db.endTransaction() }
     }
