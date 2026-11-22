@@ -222,12 +222,18 @@ class PaymentRecognitionQueueTest {
 
     @Test fun automaticAndShakeNonBillsStillShowFailureAfterDiscardingTask()=runBlocking {
         for(automatic in listOf(true,false)) {
-            val id=newTask(automatic);val feedback=mutableListOf<String>()
+            val feedback=mutableListOf<String>()
             val before=ownRecords().map { it.id }
             val factory={CaptureProcessor(app,OcrClient(app,SyntheticRecognitionBackend { _,_,_,_ ->
                 JSONObject().put("choices",org.json.JSONArray().put(JSONObject().put("message",JSONObject().put("content","{\"is_bill\":false,\"raw_text\":\"合成非账单\"}"))))
             }))}
-            assertTrue(queue.enqueue(id,WECHAT,automatic,factory) { message,loading -> if(!loading)feedback.add(message) })
+            // A completed worker may still be resuming durable tasks. Publish the fixture and
+            // its fake processor together so recovery cannot enqueue it with default feedback.
+            val id=synchronized(queue) {
+                val pending=newTask(automatic)
+                assertTrue(queue.enqueue(pending,WECHAT,automatic,factory) { message,loading -> if(!loading)feedback.add(message) })
+                pending
+            }
             await { queue.size()==0 }
             assertFalse(app.tasks.exists(id));assertNull(app.tasks.image(id))
             assertEquals(before,ownRecords().map { it.id })
