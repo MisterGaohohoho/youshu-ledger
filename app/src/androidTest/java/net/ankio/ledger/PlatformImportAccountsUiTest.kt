@@ -2,6 +2,7 @@ package net.ankio.ledger
 
 import android.content.ContentValues
 import android.graphics.Bitmap
+import android.os.Environment
 import android.os.SystemClock
 import android.provider.MediaStore
 import android.view.View
@@ -17,7 +18,6 @@ import net.ankio.ledger.ui.MintDialog
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.io.File
 import java.util.UUID
 
 /** Real document parsing, native preview, confirmation and the persisted accounting choice. */
@@ -33,8 +33,16 @@ class PlatformImportAccountsUiTest {
     private fun screenshot(name:String) {
         InstrumentationRegistry.getInstrumentation().waitForIdleSync()
         val bitmap=requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
-        val directory=File(app.getExternalFilesDir(null),"platform-import-qa").apply { mkdirs() }
-        try { File(directory,name).outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG,100,it)) } }
+        // Connected tests uninstall the app before adb collects artifacts. Shared test media survives that cleanup.
+        val uri=requireNotNull(app.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME,name);put(MediaStore.MediaColumns.MIME_TYPE,"image/png")
+            put(MediaStore.MediaColumns.RELATIVE_PATH,"${Environment.DIRECTORY_PICTURES}/platform-import-qa")
+            put(MediaStore.MediaColumns.IS_PENDING,1)
+        }))
+        try {
+            requireNotNull(app.contentResolver.openOutputStream(uri)).use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG,100,it)) }
+            app.contentResolver.update(uri,ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING,0) },null,null)
+        }
         finally { bitmap.recycle() }
     }
     private fun flow(method:String,test:(ActivityScenario<MainActivity>,MintDialog,LedgerAccount,String)->Unit) {
