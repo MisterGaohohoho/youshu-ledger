@@ -49,6 +49,9 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   assert.match(await page.locator('.balance-number').textContent(),/123\.45/);assert.equal(await page.locator('#hide-summary').getAttribute('aria-label'),'隐藏统计金额');
   assert.match(await page.locator('.budget-label').textContent(),/999\.99/);assert.equal(await page.locator('.budget-meter').getAttribute('aria-valuemax'),'99999');
   await page.reload();assert.match(await page.locator('.balance-number').textContent(),/123\.45/);
+  await page.locator('[data-filter="income"]').click();await page.locator('#hide-summary').click();await masked();
+  await page.locator('[data-filter="expense"]').click();await masked();
+  await page.locator('#hide-summary').click();
   await page.evaluate(()=>{LedgerUI.event('fontScale',1.5);const sizes=[...document.querySelectorAll('#ledger *')].map(e=>[e,parseFloat(getComputedStyle(e).fontSize)]);for(const [e,size] of sizes)e.style.fontSize=(size*1.5)+'px'});
   for(const mode of ['expense','all','income']){
    await page.locator(`[data-filter="${mode}"]`).click();await page.locator('#hide-summary').click();

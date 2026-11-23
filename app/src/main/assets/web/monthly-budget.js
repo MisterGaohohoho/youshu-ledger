@@ -7,7 +7,6 @@ window.MonthlyBudget=(()=>{
  function render(expense,income,scope='',amountsHidden=false){
   latest={expense,income,scope,amountsHidden};
   const control=document.getElementById('monthly-budget');control.hidden=income||!!(window.LedgerScope&&(!LedgerScope.isMonth(scope)||LedgerScope.channel||(typeof statsReimbursement!=='undefined'&&statsReimbursement)));
-  if(control.hidden){stop();return}
   const used=Math.max(0,Number(expense)||0),ratio=cents?used/cents:0,over=used>cents;
   control.classList.toggle('over-budget',!!cents&&over);
   control.classList.toggle('budget-unset',!cents);
@@ -17,6 +16,7 @@ window.MonthlyBudget=(()=>{
   const meter=control.querySelector('.budget-meter');meter.hidden=!cents;
   meter.setAttribute('aria-valuemax',String(amountsHidden?100:cents||1));meter.setAttribute('aria-valuenow',String(amountsHidden?Math.min(100,Math.round(ratio*100)):Math.min(used,cents)));
   meter.setAttribute('aria-label',cents?`月限额已用 ${(ratio*100).toFixed(0)}%，${amountsHidden?'金额已隐藏':over?'已超支':'剩余'+money(cents-used)+'元'}`:'未设置月限额');
+  if(control.hidden){stop();return}
   const fill=meter.firstElementChild,target=Math.min(1,ratio),key=`${scope}:${cents}`,next=`${key}:${target}`;
   if(animation&&animationKey===next)return;
   stop();fill.style.transform=`scaleX(${target})`;
