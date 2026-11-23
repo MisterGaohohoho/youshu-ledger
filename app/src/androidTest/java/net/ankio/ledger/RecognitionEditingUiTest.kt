@@ -61,6 +61,7 @@ class RecognitionEditingUiTest {
     }
     private fun capture(automation:UiAutomation,name:String) {
         instrument.waitForIdleSync()
+        SystemClock.sleep(200) // Wait for the compositor to present the latest edited state.
         val bitmap=requireNotNull(automation.takeScreenshot())
         val uri=requireNotNull(app.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME,name);put(MediaStore.MediaColumns.MIME_TYPE,"image/png")

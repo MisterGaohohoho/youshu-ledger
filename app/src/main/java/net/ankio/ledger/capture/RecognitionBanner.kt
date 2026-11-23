@@ -157,7 +157,9 @@ class RecognitionBanner(private val service:Context) {
             isFocusableInTouchMode=true;setPadding(colors.dp(16),colors.dp(12),colors.dp(16),colors.dp(16));clipChildren=false;clipToPadding=false
             setOnClickListener { dismissResult() }
             setOnApplyWindowInsetsListener { _,insets ->
-                val next=insets.getInsets(android.view.WindowInsets.Type.ime()).bottom
+                // Insets on a wrap-content overlay only describe its overlap with the IME.
+                // The display's full inset keeps the scroll area above the keyboard as it shrinks.
+                val next=windows.currentWindowMetrics.windowInsets.getInsets(android.view.WindowInsets.Type.ime()).bottom
                 if(next!=imeHeight) {imeHeight=next;scroll.requestLayout()}
                 insets
             }
