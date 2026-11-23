@@ -1,7 +1,8 @@
-## 0.5.122-youshu.1：消费树图标
+## 0.5.123-youshu.1
 
-- 应用图标更新为像素风消费树，包含支付、购物、银行卡、现金及日常生活元素。
-- 适配圆形、圆角桌面图标，同步更新系统主题单色图标与通知图标。
-- 沿用现有应用签名，可直接覆盖升级，保留账单、账户和设置。
+- Tap a recognized merchant name to edit the current bill's display name.
+- Add or edit a note directly in the recognition result, with save and cancel actions and a paused timeout while editing.
+- Hide home summary and budget amounts with the same four-asterisk mask as the Assets page. The setting is shared across summary modes and remembered after restarting the app.
+- Improve result layouts for small screens, large text and the on-screen keyboard.
 
-可在「我的 → 版本更新」下载安装，安装确认由手机系统处理。
+Install through the in-app version update page. The Android system handles installation confirmation.
