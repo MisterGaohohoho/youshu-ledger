@@ -159,10 +159,17 @@ class RecognitionEditingUiTest {
     }
 
     @Test fun keyboardKeepsSaveAndCancelReachable()=withResult {banner,_,automation ->
+        if(app.resources.configuration.fontScale>=1.3f) {
+            instrument.runOnMainSync {
+                val toggle=control<View>(banner,"result-reimbursement");val account=control<View>(banner,"result-account")
+                assertTrue("Large text must give each footer control its own row",toggle.bottom<=account.top)
+            }
+            capture(automation,"result-large-default.png")
+        }
         click(banner,"result-note");fill(banner,"多行备注\n第二行\n第三行")
         await {control<EditText>(banner,"result-editor-input").hasFocus() && root(banner).rootWindowInsets?.isVisible(android.view.WindowInsets.Type.ime())==true}
         val scroll=control<ScrollView>(banner,"result-scroll")
-        instrument.runOnMainSync {scroll.fullScroll(View.FOCUS_DOWN)}
+        instrument.runOnMainSync {scroll.scrollTo(0,scroll.getChildAt(0).height)}
         instrument.waitForIdleSync()
         val positions=mutableListOf<Rect>()
         instrument.runOnMainSync {
@@ -174,6 +181,7 @@ class RecognitionEditingUiTest {
             assertFalse(Rect.intersects(positions[0],positions[1]))
             val metrics=app.getSystemService(android.view.WindowManager::class.java).currentWindowMetrics
             val ime=root(banner).rootWindowInsets.getInsets(android.view.WindowInsets.Type.ime()).bottom
+            assertTrue("The keyboard must stay open during the geometry check",ime>0)
             assertTrue(positions.all {it.bottom<=metrics.bounds.height()-ime})
         }
         capture(automation,"result-note-keyboard-${app.resources.configuration.fontScale}.png")

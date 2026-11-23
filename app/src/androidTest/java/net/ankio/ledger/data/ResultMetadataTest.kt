@@ -79,11 +79,13 @@ class ResultMetadataTest {
         assertTrue(runCatching {store.setRecordNote(original.id,original.uid,"过时输入","")}.isFailure)
         assertTrue(runCatching {store.setRecordDisplayName(original.id,original.uid,"过时名称","另一名称")}.isFailure)
         assertEquals(edited,store.get(original.id))
-        store.delete(original.id)
+        assertTrue(store.softDelete(original.id))
         assertTrue(runCatching {store.setRecordNote(original.id,original.uid,"删除后修改","新备注")}.isFailure)
         assertTrue(runCatching {store.setRecordDisplayName(original.id,original.uid,"删除后改名",original.merchantName)}.isFailure)
         assertNull(store.get(original.id))
         assertTrue(store.undoDelete(original.id));assertEquals(edited,store.get(original.id))
+        store.delete(original.id)
+        assertTrue(runCatching {store.setRecordNote(original.id,original.uid,"永久删除后修改","新备注")}.isFailure)
     }
 
     @Test fun listSearchReportsExportsAndBackupUseTheDisplayName()=withStore {store,context,_ ->
