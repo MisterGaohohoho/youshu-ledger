@@ -58,8 +58,8 @@ android {
         applicationId = "net.ankio.ledger"
         minSdk = 30
         targetSdk = 36
-        versionCode = 130
-        versionName = "0.5.122-youshu.1"
+        versionCode = 131
+        versionName = "0.5.123-youshu.1"
         val updateBase = providers.environmentVariable("YOUSHU_UPDATE_BASE_URL").orNull?.takeIf { it.isNotBlank() } ?: "https://updates.invalid"
         require(Regex("https://[a-z0-9.-]+").matches(updateBase))
         buildConfigField("String", "UPDATE_BASE_URL", "\"$updateBase\"")
@@ -77,6 +77,9 @@ android {
     // Every variant consumes one generated copy: no duplicate asset overlays and no source rewriting.
     sourceSets.getByName("main").assets.setSrcDirs(emptyList<String>())
     buildTypes {
+        debug {
+            if (providers.gradleProperty("ledgerQa").orNull == "true") applicationIdSuffix = ".qa"
+        }
         release {
             isDebuggable = false
             isJniDebuggable = false

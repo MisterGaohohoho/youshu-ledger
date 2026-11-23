@@ -202,7 +202,7 @@ class RefundPersistenceTest {
         db.execSQL("DROP TABLE records");db.execSQL("ALTER TABLE legacy_records RENAME TO records")
         db.execSQL("DROP TABLE capture_history")
         db.version=6;store.close();store=LedgerStore(context,database,images)
-        assertEquals(17,store.readableDatabase.version);assertEquals(original,store.get(original.id))
+        assertEquals(18,store.readableDatabase.version);assertEquals(original,store.get(original.id))
         assertEquals(1,store.captureHistory(original.id).size);assertArrayEquals(first,store.historyScreenshot(original.id,1))
         assertEquals(1,images.stats().getInt("count"))
     }

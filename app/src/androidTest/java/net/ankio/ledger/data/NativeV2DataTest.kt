@@ -71,7 +71,7 @@ class NativeV2DataTest {
             db.version = 1
         }
         assertEquals(listOf(original), store.all())
-        assertEquals(17,store.readableDatabase.version)
+        assertEquals(18,store.readableDatabase.version)
         assertTrue(store.accounts().isEmpty())
         assertTrue(store.customCategories().isEmpty())
         store.readableDatabase.rawQuery("SELECT received_at FROM capture_events WHERE event_key = ?",
@@ -103,7 +103,7 @@ class NativeV2DataTest {
         assertEquals(bill, store.get(bill.id))
         assertEquals(account, store.getAccount(account.id))
         assertEquals(listOf(category), store.customCategories())
-        assertEquals(17,store.readableDatabase.version)
+        assertEquals(18,store.readableDatabase.version)
         assertTrue(store.screenshotIds().isEmpty())
     }
 

@@ -4,18 +4,19 @@ window.MonthlyBudget=(()=>{
  const seen=new Map();
  const maximum=99999999999;
  function update(value){cents=Number.isSafeInteger(value)&&value>0&&value<=maximum?value:0}
- function render(expense,income,scope=''){
-  latest={expense,income,scope};
+ function render(expense,income,scope='',amountsHidden=false){
+  latest={expense,income,scope,amountsHidden};
   const control=document.getElementById('monthly-budget');control.hidden=income||!!(window.LedgerScope&&(!LedgerScope.isMonth(scope)||LedgerScope.channel||(typeof statsReimbursement!=='undefined'&&statsReimbursement)));
-  if(control.hidden){stop();return}
   const used=Math.max(0,Number(expense)||0),ratio=cents?used/cents:0,over=used>cents;
   control.classList.toggle('over-budget',!!cents&&over);
   control.classList.toggle('budget-unset',!cents);
-  control.querySelector('.budget-label').textContent=cents?`月限额 ¥ ${money(cents)}`:'设置支出限额';
-  control.querySelector('.budget-status').textContent=cents?(over?`已超 ¥ ${money(used-cents)}`:`剩余 ¥ ${money(cents-used)}`):'每月沿用';
+  const amount=value=>amountsHidden?hiddenAmount:'¥ '+money(value);
+  control.querySelector('.budget-label').textContent=cents?`月限额 ${amount(cents)}`:'设置支出限额';
+  control.querySelector('.budget-status').textContent=cents?(over?`已超 ${amount(used-cents)}`:`剩余 ${amount(cents-used)}`):'每月沿用';
   const meter=control.querySelector('.budget-meter');meter.hidden=!cents;
-  meter.setAttribute('aria-valuemax',String(cents||1));meter.setAttribute('aria-valuenow',String(Math.min(used,cents)));
-  meter.setAttribute('aria-label',cents?`月限额已用 ${(ratio*100).toFixed(0)}%，${over?'已超支':'剩余'+money(cents-used)+'元'}`:'未设置月限额');
+  meter.setAttribute('aria-valuemax',String(amountsHidden?100:cents||1));meter.setAttribute('aria-valuenow',String(amountsHidden?Math.min(100,Math.round(ratio*100)):Math.min(used,cents)));
+  meter.setAttribute('aria-label',cents?`月限额已用 ${(ratio*100).toFixed(0)}%，${amountsHidden?'金额已隐藏':over?'已超支':'剩余'+money(cents-used)+'元'}`:'未设置月限额');
+  if(control.hidden){stop();return}
   const fill=meter.firstElementChild,target=Math.min(1,ratio),key=`${scope}:${cents}`,next=`${key}:${target}`;
   if(animation&&animationKey===next)return;
   stop();fill.style.transform=`scaleX(${target})`;
@@ -28,7 +29,7 @@ window.MonthlyBudget=(()=>{
   animation.onfinish=()=>{seen.set(key,target);animation=null;animationKey=''};
  }
  function stop(){if(animation){animation.cancel();animation=null}animationKey=''}
- function open(){if(latest)render(latest.expense,latest.income,latest.scope)}
+ function open(){if(latest)render(latest.expense,latest.income,latest.scope,latest.amountsHidden)}
  function edit(){
   showSheet('每月支出限额',`<form id="budget-form"><p class="sheet-copy" id="budget-help">设置一次，每月沿用。按所选月份的已入账支出计算，退款按账单实付金额计入。</p><label class="budget-field" for="budget-amount">月限额（元）<input id="budget-amount" type="text" inputmode="decimal" autocomplete="off" maxlength="13" placeholder="输入每月限额" value="${cents?String(cents/100):''}" aria-describedby="budget-help budget-error"/></label><p id="budget-error" class="budget-error" role="alert" hidden></p><div class="sheet-actions"><button type="button" id="budget-clear" ${cents?'':'hidden'}>移除限额</button><button class="primary" type="submit">保存限额</button></div></form>`);
   function save(amount){

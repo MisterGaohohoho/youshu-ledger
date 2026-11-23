@@ -96,16 +96,16 @@ class OfflineAnalytics(private val store: LedgerStore) {
         if(category.isNotEmpty()){condition.append(" AND r.category=?");parameters+=category}
         val search=input.optString("search").trim();require(search.length<=200)
         if(search.isNotEmpty()) {
-            condition.append(" AND (r.merchant LIKE ? ESCAPE '\\' OR r.note LIKE ? ESCAPE '\\' OR r.transaction_id LIKE ? ESCAPE '\\')")
+            condition.append(" AND (r.display_name LIKE ? ESCAPE '\\' OR r.merchant LIKE ? ESCAPE '\\' OR r.note LIKE ? ESCAPE '\\' OR r.transaction_id LIKE ? ESCAPE '\\')")
             val term="%"+search.replace("\\","\\\\").replace("%","\\%").replace("_","\\_")+"%"
-            repeat(3){parameters+=term}
+            repeat(4){parameters+=term}
         }
         val offset=input.optInt("offset",0);val limit=input.optInt("limit",50)
         require(offset in 0..1_000_000 && limit in 1..200)
         val sort=input.optString("sort","time");require(sort in setOf("time","amount"))
         val order=if(sort=="amount")"$selectedAmount DESC,r.occurred_at DESC,r.id DESC" else "r.occurred_at DESC,r.id DESC"
         val rows=JSONArray()
-        store.readableDatabase.rawQuery("SELECT r.id,r.merchant,r.category,r.occurred_at,$selectedAmount,r.direction,($CHANNEL_SQL),r.note,r.transaction_id,r.state FROM records r WHERE $condition ORDER BY $order LIMIT ${limit+1} OFFSET $offset",parameters.toTypedArray()).use { c ->
+        store.readableDatabase.rawQuery("SELECT r.id,COALESCE(r.display_name,r.merchant),r.category,r.occurred_at,$selectedAmount,r.direction,($CHANNEL_SQL),r.note,r.transaction_id,r.state FROM records r WHERE $condition ORDER BY $order LIMIT ${limit+1} OFFSET $offset",parameters.toTypedArray()).use { c ->
             while(c.moveToNext())rows.put(JSONObject().put("id",c.getLong(0)).put("merchant",c.getString(1)).put("category",c.getString(2))
                 .put("occurredAt",c.getLong(3)).put("amountCents",c.getLong(4)).put("direction",c.getString(5)).put("channel",c.getString(6))
                 .put("note",c.getString(7)).put("transactionId",if(c.isNull(8))JSONObject.NULL else c.getString(8)).put("state",c.getString(9)))

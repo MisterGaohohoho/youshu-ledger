@@ -120,7 +120,7 @@ class ReimbursementTest {
         initial.close();LegacyLedgerSchemaFixture.project(context.getDatabasePath(name).path,9)
         val upgraded=LedgerStore(context,name)
         try {
-            assertEquals(17,upgraded.readableDatabase.version)
+            assertEquals(18,upgraded.readableDatabase.version)
             assertEquals(original.copy(requiresReimbursement=true),upgraded.get(original.id))
             assertEquals(similar,upgraded.get(similar.id));assertEquals(history,upgraded.captureHistory(original.id))
             assertEquals(listOf("不报销","报销材料","项目A"),BillReports(upgraded).labels())
@@ -131,7 +131,7 @@ class ReimbursementTest {
         val item=initial.saveEdited(record(System.currentTimeMillis()));val history=initial.captureHistory(item.id);initial.close()
         LegacyLedgerSchemaFixture.project(context.getDatabasePath(name).path,8)
         val upgraded=LedgerStore(context,name)
-        try {assertEquals(item,upgraded.get(item.id));assertEquals(history,upgraded.captureHistory(item.id));assertEquals(17,upgraded.readableDatabase.version)}
+        try {assertEquals(item,upgraded.get(item.id));assertEquals(history,upgraded.captureHistory(item.id));assertEquals(18,upgraded.readableDatabase.version)}
         finally {upgraded.close();context.deleteDatabase(name)}
     }
 }

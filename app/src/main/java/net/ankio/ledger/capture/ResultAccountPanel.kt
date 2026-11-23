@@ -168,6 +168,16 @@ internal class ResultColors(private val context:Context) {
             canvas.save();canvas.translate(bounds.left.toFloat(),bounds.top.toFloat());canvas.scale(bounds.width()/20f,bounds.height()/20f)
             when(kind) {
                 "check"->{canvas.drawLine(4f,10f,8f,14f,pen);canvas.drawLine(8f,14f,16f,6f,pen)}
+                "edit"->{
+                    canvas.drawPath(android.graphics.Path().apply {moveTo(4f,13f);lineTo(13f,4f);lineTo(16f,7f);lineTo(7f,16f);lineTo(3f,17f);close()},pen)
+                    canvas.drawLine(11f,6f,14f,9f,pen)
+                }
+                "note"->{
+                    canvas.drawRoundRect(5f,3f,16f,17f,2f,2f,pen)
+                    for(y in listOf(6f,10f,14f))canvas.drawLine(3f,y,7f,y,pen)
+                    canvas.drawLine(10f,7f,13f,7f,pen);canvas.drawLine(10f,11f,13f,11f,pen)
+                }
+                "next"->{canvas.drawLine(8f,5f,13f,10f,pen);canvas.drawLine(13f,10f,8f,15f,pen)}
                 else->{canvas.drawLine(5f,8f,10f,13f,pen);canvas.drawLine(10f,13f,15f,8f,pen)}
             };canvas.restore()
         }

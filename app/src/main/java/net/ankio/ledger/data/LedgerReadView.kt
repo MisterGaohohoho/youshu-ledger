@@ -42,8 +42,8 @@ class LedgerReadView(private val store:LedgerStore) {
         where.append(reimbursementWhere(reimbursement))
         if(channel.isNotEmpty()){where.append(" AND (${OfflineAnalytics.CHANNEL_SQL})=?");args+=channel}
         if(search.isBlank()) { where.append(" AND r.occurred_at>=? AND r.occurred_at<?");args+=w.start.toString();args+=w.end.toString() }
-        else { where.append(" AND (r.merchant LIKE ? ESCAPE '\\' OR r.category LIKE ? ESCAPE '\\' OR r.note LIKE ? ESCAPE '\\' OR r.transaction_id LIKE ? ESCAPE '\\' OR CASE r.source WHEN 'OCR' THEN '摇一摇' WHEN 'IMAGE' THEN '图片导入' WHEN 'MANUAL' THEN '手动' WHEN 'SMS' THEN '自动 · 短信' WHEN 'NOTIFICATION' THEN '自动 · 通知' END LIKE ? ESCAPE '\\')")
-            val term="%"+search.replace("\\","\\\\").replace("%","\\%").replace("_","\\_")+"%";repeat(5){args+=term} }
+        else { where.append(" AND (r.display_name LIKE ? ESCAPE '\\' OR r.merchant LIKE ? ESCAPE '\\' OR r.category LIKE ? ESCAPE '\\' OR r.note LIKE ? ESCAPE '\\' OR r.transaction_id LIKE ? ESCAPE '\\' OR CASE r.source WHEN 'OCR' THEN '摇一摇' WHEN 'IMAGE' THEN '图片导入' WHEN 'MANUAL' THEN '手动' WHEN 'SMS' THEN '自动 · 短信' WHEN 'NOTIFICATION' THEN '自动 · 通知' END LIKE ? ESCAPE '\\')")
+            val term="%"+search.replace("\\","\\\\").replace("%","\\%").replace("_","\\_")+"%";repeat(6){args+=term} }
         if(direction.isNotBlank()) { where.append(if(direction=="EXPENSE")" AND (r.direction=? OR r.direction IS NULL)" else " AND r.direction=?");args+=direction }
         if(tag.isNotEmpty()) { where.append(" AND r.state='POSTED' AND instr(r.tags,?)>0");args+=BillTags.toStorage(listOf(tag)) }
         if(category.isNotBlank()) { where.append(" AND r.category=?");args+=category }
@@ -53,7 +53,7 @@ class LedgerReadView(private val store:LedgerStore) {
 
     private fun readRecords(where:String,args:List<String>,offset:Int,limit:Int):JSONObject {
         val rows=JSONArray()
-        store.readableDatabase.rawQuery("""SELECT r.id,r.uid,r.merchant,r.category,r.note,r.amount,r.direction,r.occurred_at,r.state,r.source,
+        store.readableDatabase.rawQuery("""SELECT r.id,r.uid,COALESCE(r.display_name,r.merchant),r.category,r.note,r.amount,r.direction,r.occurred_at,r.state,r.source,
             r.reason,r.duplicate_id,r.refund_provider,r.refund_original,r.refund_amount,r.refund_mode,r.refund_id,
             i.merchant_key,length(a.image), (SELECT MAX(sequence) FROM capture_history h WHERE h.record_id=r.id),r.transaction_id,
             CASE WHEN lower(r.origin) LIKE '%com.tencent.mm%' OR r.origin IN ('微信','微信支付') THEN 'wechat'

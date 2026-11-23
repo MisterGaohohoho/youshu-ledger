@@ -54,7 +54,7 @@ class ImportBatches(private val store: LedgerStore) {
         require(offset in 0..1_000_000)
         val metadata = metadata(uid)
         val rows = JSONArray()
-        store.readableDatabase.rawQuery("SELECT r.id,r.merchant,r.amount,r.direction,r.occurred_at,r.state FROM records r JOIN import_batch_items i ON i.record_uid=r.uid AND i.record_id=r.id WHERE i.batch_uid=? AND $ACTIVE ORDER BY r.occurred_at DESC,r.id DESC LIMIT 101 OFFSET ?", arrayOf(uid, offset.toString())).use { c ->
+        store.readableDatabase.rawQuery("SELECT r.id,COALESCE(r.display_name,r.merchant),r.amount,r.direction,r.occurred_at,r.state FROM records r JOIN import_batch_items i ON i.record_uid=r.uid AND i.record_id=r.id WHERE i.batch_uid=? AND $ACTIVE ORDER BY r.occurred_at DESC,r.id DESC LIMIT 101 OFFSET ?", arrayOf(uid, offset.toString())).use { c ->
             while (c.moveToNext()) rows.put(JSONObject().put("id", c.getLong(0)).put("merchant", c.getString(1))
                 .put("amount", if(c.isNull(2)) 0L else c.getLong(2)).put("direction", c.getString(3))
                 .put("at", c.getLong(4)).put("state", c.getString(5)))

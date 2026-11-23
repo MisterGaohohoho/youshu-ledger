@@ -8,9 +8,14 @@
 #ledger .balance{height:auto;min-height:128px;gap:12px;flex-wrap:wrap}
 #ledger .balance>div:first-child{min-width:0;max-width:100%}
 #ledger .balance-number{white-space:normal;overflow-wrap:anywhere}
+#ledger .balance-heading{display:flex;align-items:center;min-width:0;gap:4px;margin:-8px 0 0}
+#ledger .balance-heading .balance-title{min-width:0;margin:0;overflow-wrap:anywhere}
+#ledger #hide-summary{display:inline-flex;align-items:center;justify-content:center;flex:none;min-width:44px;min-height:44px;padding:0;border:0;border-radius:50%;background:transparent;color:#287e68;font-size:15px;cursor:pointer}
+#ledger #hide-summary:focus-visible{outline:2px solid currentColor;outline-offset:-5px}
 #ledger .balance.is-combined{display:flex;align-items:center;gap:8px 12px}
 #ledger .is-combined>div:first-child{display:contents}
-#ledger .is-combined .balance-title,#ledger .is-combined .balance-number{flex:0 0 100%;margin:0}
+#ledger .is-combined .balance-heading,#ledger .is-combined .balance-number{flex:0 0 100%;margin:0}
+#ledger .is-combined .balance-heading{margin-top:-8px;margin-bottom:-8px}
 #ledger .is-combined #home-combined{flex:0 0 100%;margin:4px 0}
 #ledger .is-combined #home-count{flex:1 0 auto;margin:0;max-width:100%;line-height:1.5}
 #home-combined{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 18px;margin:12px 0}

@@ -100,6 +100,15 @@ class LedgerWebBridge(private val activity: MainActivity) {
     fun snapshot(): String = buildSnapshot().toString()
 
     @JavascriptInterface
+    fun setSummaryAmountsHidden(hidden: Boolean): String = try {
+        app.displayPreferences.setSummaryAmountsHidden(hidden)
+        app.changed()
+        JSONObject().put("ok", true).put("summaryAmountsHidden", hidden).toString()
+    } catch (error: Exception) {
+        failure(error.message ?: "金额显示设置保存失败，请重试").toString()
+    }
+
+    @JavascriptInterface
     fun setMonthlyBudget(amount: String): String = try {
         val cents = if (amount.isEmpty()) 0L else Money.parseCents(amount)
             ?.takeIf { it > 0 } ?: throw IllegalArgumentException("请输入大于零、最多两位小数的月限额")
@@ -196,7 +205,7 @@ class LedgerWebBridge(private val activity: MainActivity) {
             records.put(JSONObject().apply {
                 put("id", record.id)
                 put("uid", record.uid)
-                put("merchant", record.bill.merchant)
+                put("merchant", record.merchantName)
                 put("category", record.bill.category)
                 put("note", record.note);put("tags",JSONArray(BillTags.encode(record.tags)));put("requiresReimbursement",record.requiresReimbursement);put("accountUid",record.accountUid?:JSONObject.NULL)
                 put("amountCents", record.bill.amountCents ?: JSONObject.NULL)
@@ -274,6 +283,7 @@ class LedgerWebBridge(private val activity: MainActivity) {
             .put("automatic",JSONObject().put("enabled",app.channels.automaticEnabled()).put("applications",applications))
             .put("screenshotStorage",app.screenshots.stats())
             .put("monthlyBudgetCents",app.monthlyBudget.cents())
+            .put("summaryAmountsHidden",app.displayPreferences.summaryAmountsHidden())
             .put("status", app.channels.lastStatus())
     } catch (_: Exception) {
         // An explicit error avoids making a failed read look like an empty ledger.
@@ -292,7 +302,7 @@ class LedgerWebBridge(private val activity: MainActivity) {
             .put("merchantIconRevision",iconKey?.let { app.store.merchantIconAsset(it)?.contentHashCode() }?:0)
             .put("captureMode",if(task?.optString("origin")?.startsWith("payment_auto:")==true)"page" else "")
             .put("refundCandidateCount",if(record.bill.refund!=null&&record.state==RecordState.REVIEW)app.store.refundCandidates(id).size else 0)
-            .put("merchant",record.bill.merchant).put("category",record.bill.category)
+            .put("merchant",record.merchantName).put("category",record.bill.category)
             .put("requiresReimbursement",record.requiresReimbursement).put("accountUid",record.accountUid?:JSONObject.NULL)
             .put("affectsBalance",record.affectsBalance)
             .put("tags",JSONArray(BillTags.encode(record.tags))).put("note",record.note).put("amountCents",record.bill.amountCents?:JSONObject.NULL).put("direction",record.bill.direction?.name?:JSONObject.NULL)
@@ -394,7 +404,7 @@ class LedgerWebBridge(private val activity: MainActivity) {
                 val existing = requireNotNull(original)
                 checkInput(validatedRefund && cents == existing.bill.amountCents && direction == existing.bill.direction,
                     "退款后的实付金额由识别记录计算，请勿手动更改金额或收支方向")
-                checkInput(merchant == existing.bill.merchant && occurredAt == existing.bill.occurredAt,
+                checkInput(merchant == existing.merchantName && occurredAt == existing.bill.occurredAt,
                     "退款账单保留原商户和交易时间，可修改分类和备注")
             }
             if (original?.duplicateId != null && !confirmed) {
@@ -407,8 +417,9 @@ class LedgerWebBridge(private val activity: MainActivity) {
                     state = RecordState.POSTED)
                 val saved = app.store.saveEdited(base.copy(
                     bill = base.bill.copy(amountCents = cents, direction = direction,
-                        merchant = merchant, category = category, occurredAt = occurredAt,
+                        merchant = if(base.displayName!=null)base.bill.merchant else merchant, category = category, occurredAt = occurredAt,
                         reliable = true, reason = "", timeExplicit = if(original!=null && occurredAt==base.bill.occurredAt)base.bill.timeExplicit else true),
+                    displayName=if(base.displayName!=null)merchant.takeUnless { it==base.bill.merchant } else null,
                     note = note, tags = if(input.has("tags"))BillTags.decode(input.getJSONArray("tags").toString()) else base.tags,
                     requiresReimbursement=if(input.has("requiresReimbursement")) {
                         val value=input.get("requiresReimbursement");checkInput(value is Boolean,"报销属性无效");value as Boolean
@@ -439,7 +450,7 @@ class LedgerWebBridge(private val activity: MainActivity) {
         checkInput(id in 1..MAX_SAFE_INTEGER, "账单编号无效")
         val candidates = JSONArray()
         app.store.refundCandidates(id).forEach { record ->
-            candidates.put(JSONObject().put("id", record.id).put("merchant", record.bill.merchant)
+            candidates.put(JSONObject().put("id", record.id).put("merchant", record.merchantName)
                 .put("occurredAt", record.bill.occurredAt).put("amountCents", record.bill.amountCents ?: JSONObject.NULL)
                 .put("originalAmountCents", record.bill.refund?.originalAmountCents ?: record.bill.amountCents ?: JSONObject.NULL))
         }

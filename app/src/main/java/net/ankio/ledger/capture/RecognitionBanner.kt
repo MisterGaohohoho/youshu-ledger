@@ -14,6 +14,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.CompoundButton
 import android.widget.FrameLayout
+import android.widget.ScrollView
 import net.ankio.ledger.core.Money
 import net.ankio.ledger.core.RecordState
 import net.ankio.ledger.data.LedgerRecord
@@ -28,6 +29,7 @@ class RecognitionBanner(private val service:Context) {
     private var hide:Runnable?=null
     private val live=RecognitionLiveUpdate(service)
     private val accountPanel=ResultAccountPanel(service)
+    private val textEditor=ResultTextEditor(service)
     private var resultIdentity:Pair<Long,String>?=null
     private var resultDeadline=0L
     private val generation=java.util.concurrent.atomic.AtomicInteger()
@@ -37,7 +39,7 @@ class RecognitionBanner(private val service:Context) {
     @Volatile private var lastFailure=""
     @Volatile private var delivery="not_shown"
     internal val attached get()=view?.isAttachedToWindow==true
-    fun diagnostics()=JSONObject().put("delivery",delivery).put("windowType",lastWindowType).put("lastFailure",lastFailure).put("attached",attached).put("accountPanelOpen",accountPanel.showing).put("liveUpdate",live.diagnostics())
+    fun diagnostics()=JSONObject().put("delivery",delivery).put("windowType",lastWindowType).put("lastFailure",lastFailure).put("attached",attached).put("accountPanelOpen",accountPanel.showing).put("editing",textEditor.field?.name?:"").put("liveUpdate",live.diagnostics())
     fun show(message:String,loading:Boolean=false,onRepair:(()->Unit)?=null,recordId:Long?=null) {
         val token=generation.incrementAndGet()
         handler.post {
@@ -50,7 +52,7 @@ class RecognitionBanner(private val service:Context) {
             val display=compactMessage(message)
             if(record!=null) {
                 live.cancel();nativeDelivery=false
-                if(live.showResult("已记账 ¥ ${Money.display(record.bill.amountCents?:0)}","${record.bill.merchant} · ${record.bill.category}","已记账")) scheduleNativeResult(record,token)
+                if(live.showResult("已记账 ¥ ${Money.display(record.bill.amountCents?:0)}","${record.merchantName} · ${record.bill.category}","已记账")) scheduleNativeResult(record,token)
                 else showResult(record,token)
                 logDelivery();return@post
             }
@@ -94,55 +96,90 @@ class RecognitionBanner(private val service:Context) {
         return service.ledger.store.get(id)?.takeIf {it.uid==uid && it.state==RecordState.POSTED}
     }
     private fun scheduleResultExpiry(token:Int,duration:Long=5_000) {
+        if(textEditor.showing || accountPanel.showing) {pauseResultExpiry();return}
         hide?.let(handler::removeCallbacks)
         resultDeadline=SystemClock.elapsedRealtime()+duration
         hide=Runnable {if(generation.get()==token)removeNow()}.also {handler.postDelayed(it,duration)}
+    }
+    private fun pauseResultExpiry() {
+        hide?.let(handler::removeCallbacks);hide=null;resultDeadline=Long.MAX_VALUE
+    }
+    private fun dismissResult(hideKeyboard:Boolean=false) {
+        when {
+            // IME touches can also be reported as outside touches on accessibility windows.
+            textEditor.showing -> {if(hideKeyboard)textEditor.hideKeyboard()}
+            accountPanel.showing -> accountPanel.close()
+            else -> removeNow()
+        }
     }
     private fun showResult(record:LedgerRecord,token:Int) {
         if(generation.get()!=token || view!=null)return
         val colors=ResultColors(service)
         val width=(service.resources.displayMetrics.widthPixels-colors.dp(32)).coerceAtMost(colors.dp(344))
+        var imeHeight=0
+        val scroll=object:ScrollView(service) {
+            override fun onMeasure(widthMeasureSpec:Int,heightMeasureSpec:Int) {
+                val metrics=windows.currentWindowMetrics
+                val safe=metrics.windowInsets.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.systemBars() or android.view.WindowInsets.Type.displayCutout())
+                val available=(metrics.bounds.height()-safe.top-maxOf(safe.bottom,imeHeight)-colors.dp(40)).coerceAtLeast(colors.dp(80))
+                val offered=View.MeasureSpec.getSize(heightMeasureSpec)
+                val maximum=if(View.MeasureSpec.getMode(heightMeasureSpec)==View.MeasureSpec.UNSPECIFIED)available else minOf(available,offered)
+                super.onMeasure(widthMeasureSpec,View.MeasureSpec.makeMeasureSpec(maximum,View.MeasureSpec.AT_MOST))
+            }
+        }.apply {
+            tag="result-scroll";isFillViewport=false;isVerticalScrollBarEnabled=false;overScrollMode=View.OVER_SCROLL_NEVER
+            background=colors.background(colors.surface,32);elevation=colors.dp(18).toFloat();clipToOutline=true
+        }
         val root=object:FrameLayout(service) {
             private var touchingCard=false
             override fun dispatchTouchEvent(event:android.view.MotionEvent):Boolean {
                 if(event.actionMasked==android.view.MotionEvent.ACTION_OUTSIDE) {
-                    if(accountPanel.showing)accountPanel.close() else removeNow()
+                    dismissResult()
                     return false
                 }
-                val inside=cardView?.let {event.x>=it.left && event.x<=it.right && event.y>=it.top && event.y<=it.bottom}==true
+                val inside=event.x>=scroll.left && event.x<=scroll.right && event.y>=scroll.top && event.y<=scroll.bottom
                 if(event.actionMasked==android.view.MotionEvent.ACTION_DOWN) {
                     touchingCard=inside
-                    if(inside && generation.get()==token && view===this) {hide?.let(this@RecognitionBanner.handler::removeCallbacks);hide=null;resultDeadline=Long.MAX_VALUE}
+                    if(inside && generation.get()==token && view===this)pauseResultExpiry()
                 }
                 val handled=super.dispatchTouchEvent(event)
                 if(event.actionMasked==android.view.MotionEvent.ACTION_UP || event.actionMasked==android.view.MotionEvent.ACTION_CANCEL) {
                     val resume=touchingCard;touchingCard=false
-                    if(resume && generation.get()==token && view===this && !accountPanel.showing)scheduleResultExpiry(token)
+                    if(resume && generation.get()==token && view===this && !accountPanel.showing && !textEditor.showing)scheduleResultExpiry(token)
                 }
                 return handled
             }
             override fun dispatchKeyEvent(event:android.view.KeyEvent):Boolean {
-                if(event.keyCode==android.view.KeyEvent.KEYCODE_BACK) { if(event.action==android.view.KeyEvent.ACTION_UP) { if(accountPanel.showing) accountPanel.close() else removeNow() }; return true }
+                if(event.keyCode==android.view.KeyEvent.KEYCODE_BACK) { if(event.action==android.view.KeyEvent.ACTION_UP)dismissResult(hideKeyboard=true); return true }
                 return super.dispatchKeyEvent(event)
             }
         }.apply {
             isFocusableInTouchMode=true;setPadding(colors.dp(16),colors.dp(12),colors.dp(16),colors.dp(16));clipChildren=false;clipToPadding=false
-            setOnClickListener { if(accountPanel.showing)accountPanel.close() else removeNow() }
+            setOnClickListener { dismissResult() }
+            setOnApplyWindowInsetsListener { _,insets ->
+                // Insets on a wrap-content overlay only describe its overlap with the IME.
+                // The display's full inset keeps the scroll area above the keyboard as it shrinks.
+                val next=windows.currentWindowMetrics.windowInsets.getInsets(android.view.WindowInsets.Type.ime()).bottom
+                if(next!=imeHeight) {imeHeight=next;scroll.requestLayout()}
+                insets
+            }
         }
         val card=resultBar(record,token)
         card.setOnClickListener { }
-        root.addView(card,FrameLayout.LayoutParams(width,-2).apply { gravity=Gravity.TOP or Gravity.CENTER_HORIZONTAL })
+        scroll.addView(card,FrameLayout.LayoutParams(-1,-2))
+        root.addView(scroll,FrameLayout.LayoutParams(width,-2).apply { gravity=Gravity.TOP or Gravity.CENTER_HORIZONTAL })
         val params=WindowManager.LayoutParams(width+colors.dp(32),-2,WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             android.graphics.PixelFormat.TRANSLUCENT).apply {
             // Accessibility windows have different default inset fitting across Android versions.
             // Use screen coordinates and the current system inset once, rather than fitting twice.
             setFitInsetsTypes(0)
+            softInputMode=WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
             gravity=Gravity.TOP or Gravity.CENTER_HORIZONTAL
             y=windows.currentWindowMetrics.windowInsets.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.statusBars() or android.view.WindowInsets.Type.displayCutout()).top+colors.dp(4)
         }
         try {
-            windows.addView(root,params);view=root;cardView=card;delivery="capsule";lastWindowType=params.type;lastFailure="";root.requestFocus();scheduleResultExpiry(token)
+            windows.addView(root,params);view=root;cardView=card;delivery="capsule";lastWindowType=params.type;lastFailure="";root.requestFocus();root.requestApplyInsets();scheduleResultExpiry(token)
         } catch(error:Exception) {
             if(root.isAttachedToWindow)runCatching {windows.removeViewImmediate(root)}
             lastFailure=error.javaClass.simpleName;delivery="toast";lastWindowType=0
@@ -152,24 +189,40 @@ class RecognitionBanner(private val service:Context) {
     private fun resultBar(record:LedgerRecord,token:Int):LinearLayout {
         val colors=ResultColors(service)
         val card=LinearLayout(service).apply {
-            orientation=LinearLayout.VERTICAL;setPadding(colors.dp(12),colors.dp(2),colors.dp(12),colors.dp(2))
-            background=colors.background(colors.surface,32);elevation=colors.dp(18).toFloat();clipToOutline=true
+            orientation=LinearLayout.VERTICAL;setPadding(colors.dp(12),colors.dp(8),colors.dp(12),colors.dp(8))
             accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
-        val actions=LinearLayout(service).apply {gravity=Gravity.CENTER_VERTICAL}
+        val stacked=service.resources.configuration.fontScale>=1.3f || service.resources.configuration.screenWidthDp<320
+        val actions=LinearLayout(service).apply {gravity=Gravity.CENTER_VERTICAL;tag="result-actions";orientation=if(stacked)LinearLayout.VERTICAL else LinearLayout.HORIZONTAL}
         val name=record.accountUid?.let {uid ->service.ledger.store.accounts().firstOrNull {it.uid==uid}?.name}?:"未关联账户"
         fun current()=generation.get()==token && cardView===card && view?.isAttachedToWindow==true
         card.addView(colors.text((if(record.bill.direction==net.ankio.ledger.core.Direction.EXPENSE) "− ¥ " else "+ ¥ ")+Money.display(record.bill.amountCents?:0),30,true).apply { gravity=Gravity.CENTER; setTextColor(colors.ink); includeFontPadding=true;tag="result-amount";minimumHeight=colors.dp(40) },LinearLayout.LayoutParams(-1,-2))
-        val merchant=LinearLayout(service).apply { gravity=Gravity.CENTER; setPadding(colors.dp(8),0,colors.dp(8),0);tag="result-merchant" }
+        val merchant=LinearLayout(service).apply {
+            gravity=Gravity.CENTER;setPadding(colors.dp(8),colors.dp(4),colors.dp(8),colors.dp(4));minimumHeight=colors.dp(52);tag="result-merchant"
+            isFocusable=true;isClickable=true;background=colors.ripple()
+            contentDescription="修改显示名称，${record.merchantName}，分类${record.bill.category}"
+            setOnClickListener {if(current())showTextEditor(record.id,record.uid,ResultTextEditor.Field.NAME)}
+        }
         val merchantIcon=android.widget.ImageView(service).apply {setImageDrawable(colors.pictogram("merchant"));scaleType=android.widget.ImageView.ScaleType.FIT_CENTER;importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO}
         merchant.addView(merchantIcon,LinearLayout.LayoutParams(colors.dp(24),colors.dp(24)))
         Thread { val bytes=service.ledger.store.merchantIcon(record.id);val bitmap=bytes?.let {BitmapFactory.decodeByteArray(it,0,it.size,BitmapFactory.Options().apply {inSampleSize=2})}; merchantIcon.post {if(current() && bitmap!=null)merchantIcon.setImageBitmap(bitmap)} }.start()
-        merchant.addView(colors.text("${record.bill.merchant} (${record.bill.category})",14,false).apply { setTextColor(colors.secondary);maxLines=1; ellipsize=android.text.TextUtils.TruncateAt.END;contentDescription="${record.bill.merchant}，${record.bill.category}" },LinearLayout.LayoutParams(-2,-2).apply {leftMargin=colors.dp(8)})
-        card.addView(merchant,LinearLayout.LayoutParams(-1,colors.dp(24)))
-        card.addView(View(service).apply {setBackgroundColor(if(colors.dark)0xff3e4a45.toInt() else 0xffe5ece9.toInt())},LinearLayout.LayoutParams(-1,colors.dp(1)).apply {topMargin=colors.dp(2);bottomMargin=colors.dp(2)})
-        val reimbursement=LinearLayout(service).apply {gravity=Gravity.CENTER_VERTICAL}
-        reimbursement.addView(colors.accountGlyph("receipt").apply {translationY=colors.dp(4).toFloat()},LinearLayout.LayoutParams(colors.dp(24),colors.dp(28)))
-        reimbursement.addView(colors.text("标记为待报销",16,true).apply {translationY=colors.dp(4).toFloat()},LinearLayout.LayoutParams(0,-2,1f).apply {leftMargin=colors.dp(8)})
+        val labelWidth=(service.resources.displayMetrics.widthPixels-colors.dp(32)).coerceAtMost(colors.dp(344))-colors.dp(98)
+        val labels=LinearLayout(service).apply {orientation=LinearLayout.VERTICAL;importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS}
+        labels.addView(colors.text(record.merchantName,14,true).apply {tag="result-merchant-name";maxLines=1;maxWidth=labelWidth;ellipsize=android.text.TextUtils.TruncateAt.END})
+        labels.addView(colors.text(record.bill.category,12).apply {tag="result-category";setTextColor(colors.secondary);maxLines=1;maxWidth=labelWidth;ellipsize=android.text.TextUtils.TruncateAt.END})
+        merchant.addView(labels,LinearLayout.LayoutParams(-2,-2).apply {leftMargin=colors.dp(8)})
+        merchant.addView(View(service).apply {background=colors.symbol("edit");importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO},LinearLayout.LayoutParams(colors.dp(18),colors.dp(18)).apply {leftMargin=colors.dp(8)})
+        card.addView(merchant,LinearLayout.LayoutParams(-1,-2))
+        card.addView(colors.action(if(record.note.isBlank())"添加备注" else record.note.replace('\n',' ')).apply {
+            tag="result-note";textSize=14f;gravity=Gravity.START or Gravity.CENTER_VERTICAL;setSingleLine();ellipsize=android.text.TextUtils.TruncateAt.END
+            setTextColor(if(record.note.isBlank())colors.secondary else colors.ink)
+            background=colors.ripple(colors.background(if(colors.dark)0xff2c3632.toInt() else 0xfff0f5f4.toInt(),12))
+            compoundDrawablePadding=colors.dp(8)
+            setCompoundDrawables(colors.symbol("note").apply {setBounds(0,0,colors.dp(18),colors.dp(18))},null,colors.symbol("next").apply {setBounds(0,0,colors.dp(12),colors.dp(12))},null)
+            contentDescription=if(record.note.isBlank())"添加备注" else "编辑备注，${record.note}"
+            setOnClickListener {if(current())showTextEditor(record.id,record.uid,ResultTextEditor.Field.NOTE)}
+        },LinearLayout.LayoutParams(-1,-2).apply {topMargin=colors.dp(4);bottomMargin=colors.dp(8)})
+        card.addView(View(service).apply {tag="result-divider";setBackgroundColor(if(colors.dark)0xff3e4a45.toInt() else 0xffe5ece9.toInt())},LinearLayout.LayoutParams(-1,colors.dp(1)).apply {bottomMargin=colors.dp(4)})
         val accountButton=colors.action(name).apply {
             gravity=Gravity.START or Gravity.CENTER_VERTICAL;textSize=13f;setSingleLine();ellipsize=android.text.TextUtils.TruncateAt.MIDDLE
             val kind=service.ledger.store.accounts().firstOrNull {it.uid==record.accountUid}?.kind?:"custom"
@@ -179,12 +232,12 @@ class RecognitionBanner(private val service:Context) {
             compoundDrawablePadding=colors.dp(6);tag="result-account"
             contentDescription="当前扣款账户，$name，点击更换"
             text=name; setOnClickListener {if(current()) {if(accountPanel.showing)accountPanel.close() else showAccountPanel(record.id,record.uid)}}
-            // Bring the two visual rows closer without overlapping their 48dp hit regions.
-            setTextColor(colors.ink);background=android.graphics.drawable.InsetDrawable(colors.background(if(colors.dark)0xff2c3632.toInt() else 0xfff2f6f7.toInt(),16),0,colors.dp(4),0,colors.dp(4));setPadding(colors.dp(8),0,colors.dp(8),0)
+            setTextColor(colors.ink);background=colors.ripple(colors.background(if(colors.dark)0xff2c3632.toInt() else 0xfff2f6f7.toInt(),12));setPadding(colors.dp(8),colors.dp(6),colors.dp(8),colors.dp(6))
         }
-        actions.addView(accountButton,LinearLayout.LayoutParams(-1,colors.dp(48)))
         val error=colors.text("",14).apply {tag="result-error";setTextColor(colors.error);visibility=View.GONE;accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE}
-        reimbursement.addView(colors.reimbursementSwitch(record.requiresReimbursement).apply {
+        val reimbursement=colors.reimbursementSwitch(record.requiresReimbursement).apply {
+            text="待报销";gravity=Gravity.CENTER_VERTICAL;textSize=14f;setTypeface(typeface,android.graphics.Typeface.BOLD)
+            setPadding(colors.dp(6),0,colors.dp(6),0);switchPadding=colors.dp(6)
             setOnCheckedChangeListener(object:CompoundButton.OnCheckedChangeListener {
                 override fun onCheckedChanged(button:CompoundButton,enabled:Boolean) {
                     if(!current())return
@@ -193,7 +246,7 @@ class RecognitionBanner(private val service:Context) {
                     runCatching {service.ledger.store.setRequiresReimbursement(record.id,record.uid,enabled)}
                         .onSuccess {
                             error.visibility=View.GONE;error.text=""
-                            service.ledger.changed();if(!accountPanel.showing)scheduleResultExpiry(token)
+                            service.ledger.changed();scheduleResultExpiry(token)
                         }
                         .onFailure {
                             button.setOnCheckedChangeListener(null);button.isChecked=latest.requiresReimbursement
@@ -202,16 +255,66 @@ class RecognitionBanner(private val service:Context) {
                         }
                 }
             })
-        },LinearLayout.LayoutParams(-2,-2).apply {leftMargin=colors.dp(12)})
-        card.addView(reimbursement,LinearLayout.LayoutParams(-1,colors.dp(48)))
+        }
+        actions.addView(reimbursement,if(stacked)LinearLayout.LayoutParams(-1,-2) else LinearLayout.LayoutParams(0,-2,1f).apply {rightMargin=colors.dp(8)})
+        actions.addView(accountButton,if(stacked)LinearLayout.LayoutParams(-1,-2).apply {topMargin=colors.dp(4)} else LinearLayout.LayoutParams(0,-2,1f))
         card.addView(actions,LinearLayout.LayoutParams(-1,-2))
         card.addView(error)
         card.addView(LinearLayout(service).apply { tag="account-menu-host" },LinearLayout.LayoutParams(-1,-2))
+        card.addView(LinearLayout(service).apply {tag="result-editor-host";orientation=LinearLayout.VERTICAL;visibility=View.GONE},LinearLayout.LayoutParams(-1,-2).apply {topMargin=colors.dp(12)})
         return card
+    }
+    private fun showTextEditor(id:Long,uid:String,field:ResultTextEditor.Field) {
+        if(textEditor.showing)return
+        val record=currentResult(id,uid)?:return
+        val card=cardView?:return
+        val token=generation.get()
+        accountPanel.close(false)
+        pauseResultExpiry()
+        textEditor.show(field,record,card,save={value ->
+            if(generation.get()!=token || cardView!==card || currentResult(id,uid)==null) {
+                if(generation.get()==token)removeNow()
+                "此账单提示已结束，请重新打开账单"
+            } else runCatching {
+                when(field) {
+                    ResultTextEditor.Field.NAME -> service.ledger.store.setRecordDisplayName(id,uid,value,record.merchantName)
+                    ResultTextEditor.Field.NOTE -> service.ledger.store.setRecordNote(id,uid,value,record.note)
+                }
+                service.ledger.changed()
+            }.exceptionOrNull()?.let {it.message?:"保存失败，请重试"}
+        },closed={
+            if(generation.get()==token && cardView===card) {
+                val latest=currentResult(id,uid)
+                if(latest==null)removeNow() else {
+                    refreshResultText(card,latest)
+                    setTextEditing(card,null)
+                    view?.requestFocus()
+                    scheduleResultExpiry(token)
+                }
+            }
+        })
+        setTextEditing(card,field)
+    }
+    private fun setTextEditing(card:LinearLayout,field:ResultTextEditor.Field?) {
+        card.accessibilityLiveRegion=if(field==null)View.ACCESSIBILITY_LIVE_REGION_POLITE else View.ACCESSIBILITY_LIVE_REGION_NONE
+        for(tag in listOf("result-note","result-actions","result-divider"))card.findViewWithTag<View>(tag)?.visibility=if(field==null)View.VISIBLE else View.GONE
+        card.findViewWithTag<View>("result-merchant")?.apply {visibility=if(field==ResultTextEditor.Field.NAME)View.GONE else View.VISIBLE;isEnabled=field==null}
+        card.findViewWithTag<View>("result-error")?.visibility=View.GONE
+    }
+    private fun refreshResultText(card:LinearLayout,record:LedgerRecord) {
+        card.findViewWithTag<TextView>("result-merchant-name")?.text=record.merchantName
+        card.findViewWithTag<TextView>("result-category")?.text=record.bill.category
+        card.findViewWithTag<View>("result-merchant")?.contentDescription="修改显示名称，${record.merchantName}，分类${record.bill.category}"
+        card.findViewWithTag<TextView>("result-note")?.apply {
+            text=if(record.note.isBlank())"添加备注" else record.note.replace('\n',' ')
+            contentDescription=if(record.note.isBlank())"添加备注" else "编辑备注，${record.note}"
+            setTextColor(if(record.note.isBlank())ResultColors(service).secondary else ResultColors(service).ink)
+        }
     }
     /** Main-thread only: selection keeps the successful result's identity and expiry. */
     fun showAccountPanel(id:Long,uid:String):Boolean {
         if(Looper.myLooper()!=Looper.getMainLooper())return false
+        if(textEditor.showing)return false
         val record=currentResult(id,uid)?:return false
         if(accountPanel.showing)return false
         val token=generation.get()
@@ -224,9 +327,7 @@ class RecognitionBanner(private val service:Context) {
             if(generation.get()==token) scheduleResultExpiry(token)
         })
         if(opened) {
-            hide?.let(handler::removeCallbacks);hide=null
-            // The selection owns focus and lifetime until Back, outside touch, or a choice.
-            resultDeadline=Long.MAX_VALUE
+            pauseResultExpiry()
             cardView?.requestLayout()
         }
         return opened
@@ -284,7 +385,7 @@ class RecognitionBanner(private val service:Context) {
         "权限" in message -> "权限不足，请检查设置"
         else -> message.replace("\n"," ").take(19)+"…"
     }
-    private fun clearOverlay() { hide?.let(handler::removeCallbacks);hide=null;accountPanel.close(false);view?.let { it.animate().cancel();try { windows.removeViewImmediate(it) } catch(_:Exception) {} };view=null;cardView=null }
+    private fun clearOverlay() { hide?.let(handler::removeCallbacks);hide=null;textEditor.close(false);accountPanel.close(false);view?.let { it.animate().cancel();try { windows.removeViewImmediate(it) } catch(_:Exception) {} };view=null;cardView=null }
     fun removeNow() { generation.incrementAndGet();clearOverlay();live.cancel();nativeDelivery=false;resultIdentity=null;resultDeadline=0 }
     fun close() { val token=generation.incrementAndGet();handler.post { if(generation.get()==token)removeNow() } }
 }

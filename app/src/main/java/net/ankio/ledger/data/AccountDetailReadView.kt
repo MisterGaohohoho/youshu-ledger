@@ -23,7 +23,7 @@ class AccountDetailReadView(private val store:LedgerStore) {
         if(filter!="transfer") {
             val direction=when(filter) { "expense"->" AND r.direction='EXPENSE'";"income"->" AND r.direction='INCOME'";else->"" }
             parts+="""SELECT 'record' AS kind,r.id AS id,r.uid AS uid,r.occurred_at AS occurred_at,r.direction AS direction,
-                r.amount AS amount,r.merchant AS merchant,r.category AS category,r.requires_reimbursement AS reimbursement,
+                r.amount AS amount,COALESCE(r.display_name,r.merchant) AS merchant,r.category AS category,r.requires_reimbursement AS reimbursement,
                 CASE WHEN a.image IS NULL THEN 0 ELSE 1 END AS has_icon,r.note AS note,
                 NULL AS from_uid,NULL AS to_uid,NULL AS from_name,NULL AS to_name,$statistical AS statistical_amount
                 FROM records r LEFT JOIN merchant_icons i ON i.record_id=r.id

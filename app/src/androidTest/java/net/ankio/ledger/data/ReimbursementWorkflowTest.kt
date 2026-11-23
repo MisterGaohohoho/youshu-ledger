@@ -222,7 +222,7 @@ class ReimbursementWorkflowTest {
             db.version=10
         }
         val upgraded=LedgerStore(context,name);stores[stores.lastIndex]=name to upgraded
-        assertEquals(17,upgraded.readableDatabase.version);assertEquals(original,upgraded.get(original.id));assertEquals(history,upgraded.captureHistory(original.id))
+        assertEquals(18,upgraded.readableDatabase.version);assertEquals(original,upgraded.get(original.id));assertEquals(history,upgraded.captureHistory(original.id))
         val r=ReimbursementStore(context,upgraded)
         assertEquals(1200L,r.snapshot().getJSONArray("expenses").getJSONObject(0).getLong("paidCents"))
         assertEquals(0,r.backupMetadata().getJSONArray("claims").length());assertEquals(0,r.backupMetadata().getJSONArray("repayments").length())

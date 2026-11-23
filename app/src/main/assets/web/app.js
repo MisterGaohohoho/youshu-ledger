@@ -4,6 +4,9 @@ const native=window.LedgerNative;
 // Android 11 may ship an older WebView that supports grid gap but not flex gap.
 const gapProbe=document.createElement('div');gapProbe.style.cssText='display:flex;flex-direction:column;row-gap:1px;position:absolute;visibility:hidden';gapProbe.innerHTML='<div style="height:1px"></div><div style="height:1px"></div>';document.body.append(gapProbe);document.body.classList.toggle('no-flex-gap',gapProbe.scrollHeight!==3);gapProbe.remove();
 let query='',searching=false;
+let summaryAmountsHidden=false;
+const hiddenAmount='****';
+const summaryMoney=cents=>summaryAmountsHidden?hiddenAmount:'¥ '+money(cents);
 let ledgerView=null,viewKey='',viewLimit=200,searchTimer,undoTimer;
 let dataRevision='',loadedScope='',loadingPage=false,editorBaseline=null,recordReturnControl=null;
 const listScope=()=>JSON.stringify([month,query,filter,LedgerScope.channel,statsReimbursement]);
@@ -52,15 +55,16 @@ function render(){
  const combined=filter==='all',selected=filter==='income'?'income':'expense',direction=ledgerDirection();
  document.querySelector('.balance').classList.toggle('is-combined',combined);
  $('home-combined').hidden=!combined;
- $('home-combined').innerHTML=`<div><dt>收入</dt><dd>¥ ${money(total.income)}</dd></div><div><dt>支出</dt><dd>¥ ${money(total.expense)}</dd></div>`;
+ $('home-combined').innerHTML=`<div><dt>收入</dt><dd>${summaryMoney(total.income)}</dd></div><div><dt>支出</dt><dd>${summaryMoney(total.expense)}</dd></div>`;
  document.querySelector('.balance-title').textContent=(query?'搜索结果':LedgerScope.prefix(month))+(combined?'结余':selected==='income'?'收入':'支出');
- document.querySelector('.balance-number').innerHTML=`<small>¥</small> ${money(combined?total.income-total.expense:total[selected])}`;
+ document.querySelector('.balance-number').innerHTML=summaryAmountsHidden?hiddenAmount:`<small>¥</small> ${money(combined?total.income-total.expense:total[selected])}`;
+ $('hide-summary').setAttribute('aria-label',summaryAmountsHidden?'显示统计金额':'隐藏统计金额');$('hide-summary').setAttribute('aria-pressed',String(summaryAmountsHidden));$('hide-summary').innerHTML=`<i class="fa-solid fa-${summaryAmountsHidden?'eye-slash':'eye'}" aria-hidden="true"></i>`;
  $('home-count').textContent=`共 ${combined?(total.incomeCount??list.filter(r=>r.direction==='INCOME').length)+(total.expenseCount??list.filter(r=>r.direction==='EXPENSE').length):(total[selected+'Count']??list.filter(r=>r.direction===direction).length)} 笔${combined?'收支':selected==='income'?'收入':'消费'}`;
- document.querySelector('.totals').innerHTML=`<div>收入 ¥ ${money(total.income)}</div><div>支出 ¥ ${money(total.expense)}</div>`;
+ document.querySelector('.totals').innerHTML=`<div>收入 ${summaryMoney(total.income)}</div><div>支出 ${summaryMoney(total.expense)}</div>`;
  drawChart(list,new Date(),ledgerView?.summary?.days);
  const previous=localMonth(new Date(Number(y),Number(m)-2,1).getTime()),before=ledgerView?.summary?.previous?.[selected]??sums(records.filter(r=>r.state==='POSTED'&&localMonth(r.occurredAt)===previous))[selected];
  $('home-change').textContent=combined||query?(query?'查看搜索汇总':'查看收支趋势'):before?`较上月 ${total[selected]>=before?'↑':'↓'} ${Math.abs((total[selected]-before)/before*100).toFixed(0)}%`:'本月每日趋势';
- MonthlyBudget.render(total.expense,selected==='income',month);$('monthly-budget').hidden=selected==='income'||!LedgerScope.isMonth(month)||!!LedgerScope.channel||!!statsReimbursement;
+ MonthlyBudget.render(total.expense,selected==='income',month,summaryAmountsHidden);$('monthly-budget').hidden=selected==='income'||!LedgerScope.isMonth(month)||!!LedgerScope.channel||!!statsReimbursement;
  const search=query.toLowerCase();
  const shown=records.filter(r=>(r.state==='POSTED'||r.state==='REVIEW')&&(query||LedgerScope.contains(month,r.occurredAt))
   &&(filter==='all'||(filter==='income'?r.direction==='INCOME':r.direction!=='INCOME'))
@@ -164,7 +168,7 @@ function drawSettings(){
  }
 }
 function drawChart(list,now=new Date(),aggregated=null){
- if(filter==='all'||query||!LedgerScope.isMonth(month)){$('home-bars').innerHTML='';$('home-change').textContent='查看收支趋势';return}
+ if(filter==='all'||query||!LedgerScope.isMonth(month)){$('home-bars').innerHTML='';$('home-bars').removeAttribute('aria-label');$('home-change').textContent='查看收支趋势';return}
  const [year,mo]=month.split('-').map(Number),days=new Date(year,mo,0).getDate(),current=localMonth(now.getTime());
  const eligible=list.filter(r=>r.state==='POSTED'&&LedgerScope.contains(month,r.occurredAt)&&Number.isSafeInteger(r.amountCents)&&r.amountCents>0&&['INCOME','EXPENSE'].includes(r.direction));
  // Current months stop at today, except explicitly dated future records. Past months use the full month.
@@ -181,7 +185,7 @@ function drawChart(list,now=new Date(),aggregated=null){
  let caption=document.querySelector('.trend-caption');if(!caption){caption=document.createElement('button');caption.className='trend-caption';caption.type='button';document.querySelector('.chart').prepend(caption)}caption.textContent=`每日${name} · 查看明细`;caption.onclick=showTrendDetails;caption.setAttribute('aria-label',`查看每日${name}明细`);
  const buckets=Array(8).fill(0);values.forEach((v,i)=>buckets[Math.min(7,Math.floor(i/lastDay*8))]+=v);const peak=Math.max(1,...buckets);
  $('home-bars').innerHTML=buckets.map((v,i)=>`<i style="height:${v?Math.max(6,v/peak*51):3}px;--bar-index:${i}" aria-hidden="true"></i>`).join('');
- $('home-bars').setAttribute('aria-label',`${name}${money(sum)}元，按日期分为八段`);
+ $('home-bars').setAttribute('aria-label',summaryAmountsHidden?`${name}趋势，金额已隐藏，按日期分为八段`:`${name}${money(sum)}元，按日期分为八段`);
  svg.dataset.endDay=lastDay;svg.dataset.endCents=sum;svg.dataset.maxCents=max;svg.dataset.dailyCents=JSON.stringify(cumulative);
 }
 function showTrendDetails(){
@@ -208,6 +212,7 @@ function refresh(){
   if(retainTail&&ledgerView){ledgerView.hasMore=previousView.hasMore;ledgerView.nextCursor=previousView.nextCursor}
   recognitionTasks=result.recognitionTasks||[];channels=result.channels;accounts=result.accounts||[];bankOptions=result.bankOptions||[];customCategories=result.customCategories||{expense:[],income:[]};automationRunning=!!result.automationRunning;automatic=result.automatic||{enabled:false,applications:[]};screenshotStorage=result.screenshotStorage||{};captureHealth=result.captureHealth||{enabled:false,ready:false};
   MonthlyBudget.update(result.monthlyBudgetCents);
+  if(typeof result.summaryAmountsHidden==='boolean')summaryAmountsHidden=result.summaryAmountsHidden;
   showUndo(result.pendingDeletion);render();syncTaskEditor();syncRecordHistory();return true;
  }catch(_){notify('账本读取失败，请重试');return false}
 }
@@ -486,6 +491,14 @@ function accountSymbol(kind){
 function accountDefaultRoles(account){return [account.isDefault?'通用默认':'',account.isWechatDefault?'微信默认':'',account.isAlipayDefault?'支付宝默认':''].filter(Boolean)}
 function drawAssets(){AccountExperience.assets()}
 $('hide-assets').onclick=()=>{assetsHidden=!assetsHidden;drawAssets();remember()};
+$('hide-summary').onclick=event=>{
+ event.stopPropagation();
+ const hidden=!summaryAmountsHidden;
+ try{
+  if(native){const result=JSON.parse(native.setSummaryAmountsHidden(hidden));if(!result.ok)throw Error(result.error||'金额显示设置保存失败，请重试')}
+  summaryAmountsHidden=hidden;render();
+ }catch(error){notify(error.message||'金额显示设置保存失败，请重试')}
+};
 $('add-account').onclick=()=>editAccount();
 function editAccount(id=0){AccountExperience.edit(id)}
 

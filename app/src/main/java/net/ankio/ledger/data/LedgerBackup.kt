@@ -139,6 +139,7 @@ object LedgerBackup {
             put("amount", r.bill.amountCents ?: JSONObject.NULL)
             put("direction", r.bill.direction?.name ?: JSONObject.NULL)
             put("merchant", r.bill.merchant); put("category", r.bill.category)
+            put("displayName",r.displayName ?: JSONObject.NULL)
             put("occurredAt", r.bill.occurredAt); put("transactionId", r.bill.transactionId ?: JSONObject.NULL)
             put("reliable", r.bill.reliable); put("timeExplicit", r.bill.timeExplicit)
             put("state", r.state.name); put("reason", r.reason)
@@ -249,7 +250,10 @@ object LedgerBackup {
                 accountUid=if(version>=6 && !obj.isNull("accountUid"))text("accountUid",36) else null,
                 accountEffect=if(version>=6)integer("accountEffect").also { require(it in -Money.MAX_CENTS..Money.MAX_CENTS) } else 0,
                 affectsBalance=if(version>=10)bool("affectsBalance") else true,
-                accountSelectionExplicit=if(version>=10)bool("accountSelectionExplicit") else false)
+                accountSelectionExplicit=if(version>=10)bool("accountSelectionExplicit") else false,
+                displayName=if(obj.isNull("displayName"))null else text("displayName").also {
+                    require(it.isNotBlank() && it.none { c -> c=='\n' || c=='\r' || c=='\u0000' }) { "显示名称无效" }
+                })
         }
         val settings = root.getJSONObject("channels")
         val channels = ChannelSettings.Channel.entries.associateWith { channel ->
