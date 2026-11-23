@@ -163,7 +163,7 @@ class RecognitionBanner(private val service:Context) {
         }
         val card=resultBar(record,token)
         card.setOnClickListener { }
-        scroll.addView(card,ScrollView.LayoutParams(-1,-2))
+        scroll.addView(card,FrameLayout.LayoutParams(-1,-2))
         root.addView(scroll,FrameLayout.LayoutParams(width,-2).apply { gravity=Gravity.TOP or Gravity.CENTER_HORIZONTAL })
         val params=WindowManager.LayoutParams(width+colors.dp(32),-2,WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
@@ -293,6 +293,7 @@ class RecognitionBanner(private val service:Context) {
         setTextEditing(card,field)
     }
     private fun setTextEditing(card:LinearLayout,field:ResultTextEditor.Field?) {
+        card.accessibilityLiveRegion=if(field==null)View.ACCESSIBILITY_LIVE_REGION_POLITE else View.ACCESSIBILITY_LIVE_REGION_NONE
         for(tag in listOf("result-note","result-actions","result-divider"))card.findViewWithTag<View>(tag)?.visibility=if(field==null)View.VISIBLE else View.GONE
         card.findViewWithTag<View>("result-merchant")?.apply {visibility=if(field==ResultTextEditor.Field.NAME)View.GONE else View.VISIBLE;isEnabled=field==null}
         card.findViewWithTag<View>("result-error")?.visibility=View.GONE

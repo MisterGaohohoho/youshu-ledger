@@ -77,6 +77,9 @@ android {
     // Every variant consumes one generated copy: no duplicate asset overlays and no source rewriting.
     sourceSets.getByName("main").assets.setSrcDirs(emptyList<String>())
     buildTypes {
+        debug {
+            if (providers.gradleProperty("ledgerQa").orNull == "true") applicationIdSuffix = ".qa"
+        }
         release {
             isDebuggable = false
             isJniDebuggable = false
