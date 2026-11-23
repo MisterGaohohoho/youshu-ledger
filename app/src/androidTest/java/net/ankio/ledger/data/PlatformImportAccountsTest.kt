@@ -253,7 +253,7 @@ class PlatformImportAccountsTest {
         assertTrue(decode(legacy.toString()).records.single().affectsBalance)
         store.close();LegacyLedgerSchemaFixture.project(context.getDatabasePath(name).path,16)
         LedgerStore(context,name).use { upgraded ->
-            assertEquals(17,upgraded.readableDatabase.version)
+            assertEquals(18,upgraded.readableDatabase.version)
             assertEquals(records,upgraded.all());assertEquals(accounts,upgraded.accounts())
             assertEquals(0,ImportBatches(upgraded).editedCount(batch))
             val record=upgraded.all().single();upgraded.delete(record.id)

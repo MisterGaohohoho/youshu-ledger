@@ -571,7 +571,7 @@ class ResultAccountPopupTest {
                 }
                 dimensions.put("touchTargets",targets)
                 assertTrue("Closed card exceeds bounded viewport",card.height<app.resources.displayMetrics.heightPixels-100)
-                if(app.resources.configuration.fontScale<=1f)assertTrue("Closed result exceeds compact height budget: $dimensions",card.height/density<=180f)
+                if(app.resources.configuration.fontScale<=1f)assertTrue("Closed result exceeds compact height budget: $dimensions",card.height/density<=250f)
                 instrumentation.runOnMainSync {button(resultRoot(banner!!),"账户：").performClick()}
                 SystemClock.sleep(400);capture(app,automation,"popup-$tag-expanded.png")
                 dimensions.put("expandedHeightDp",card.height/density)

@@ -5,13 +5,13 @@ const AccountExperience=(()=>{
  const parse=value=>{const result=JSON.parse(value);if(!result.ok)throw Error(result.error||'操作失败，请重试');return result};
  const find=uid=>accounts.find(a=>a.uid===uid);
  const symbol=a=>`<span class="account-app-symbol">${accountSymbol(a?.kind||'custom')}</span>`;
- const fmt=cents=>assetsHidden?'****':cents<0?signedMoney(Math.abs(cents)):'¥ '+money(cents);
+ const fmt=cents=>assetsHidden?hiddenAmount:cents<0?signedMoney(Math.abs(cents)):'¥ '+money(cents);
  const preferred=a=>!!(a.isDefault||a.isWechatDefault||a.isAlipayDefault);
  const orderedAccounts=()=>[...accounts].sort((a,b)=>Number(preferred(b))-Number(preferred(a)));
 
  function assets(){
   const included=accounts.filter(a=>a.includedInAssets!==false),total=type=>included.filter(a=>a.type===type).reduce((s,a)=>s+a.amountCents,0);
-  $('net-amount').innerHTML=assetsHidden?'****':`${total('ASSET')<total('LIABILITY')?'− ':''}<small>¥</small>${money(Math.abs(total('ASSET')-total('LIABILITY')))}`;
+  $('net-amount').innerHTML=assetsHidden?hiddenAmount:`${total('ASSET')<total('LIABILITY')?'− ':''}<small>¥</small>${money(Math.abs(total('ASSET')-total('LIABILITY')))}`;
   $('asset-summary').innerHTML=`<div>总资产<b>${fmt(total('ASSET'))}</b></div><div>总负债<b>${fmt(total('LIABILITY'))}</b></div>`;
   $('account-count').textContent=`共 ${accounts.length} 个账户`;
   $('account-preferences').innerHTML='<h2 class="sr-only" id="account-preferences-title">默认记账扣款偏好</h2><div class="preference-controls" role="group" aria-labelledby="account-preferences-title">'+[['common','通用','wallet','isDefault'],['wechat','微信','','isWechatDefault'],['alipay','支付宝','','isAlipayDefault']].map(([channel,label,glyph,flag])=>{

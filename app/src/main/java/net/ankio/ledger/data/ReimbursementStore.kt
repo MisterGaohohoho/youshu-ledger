@@ -165,7 +165,7 @@ class ReimbursementStore(context: Context, private val ledger: LedgerStore) {
     private fun expense(uid: String): JSONObject {
         val record = expenseRecord(uid)
         return JSONObject().put("recordUid", uid).put("id", record.id)
-            .put("merchant", record.bill.merchant).put("category", record.bill.category)
+            .put("merchant", record.merchantName).put("category", record.bill.category)
             .put("occurredAt", record.bill.occurredAt).put("paidCents", requireNotNull(record.bill.amountCents))
             .put("note", record.note).put("attachments", JSONArray(attachmentsFor(uid)))
     }

@@ -27,7 +27,9 @@ data class LedgerRecord(
     val accountEffect: Long = 0,
     val affectsBalance: Boolean = true,
     val accountSelectionExplicit: Boolean = false,
+    val displayName: String? = null,
 ) {
+    val merchantName: String get() = displayName ?: bill.merchant
     fun existing() = ExistingBill(id, capture.source, capture.origin, capture.text,
         bill.amountCents, bill.direction, bill.merchant, bill.occurredAt, bill.transactionId, bill.timeExplicit)
 }
@@ -44,7 +46,7 @@ sealed class IngestResult {
 
 data class DeletedRecord(val id:Long,val expiresAt:Long,val batchId:String?=null,val count:Int=1)
 
-class LedgerStore(context: Context, private val name: String = "ledger.db", private val screenshots: ScreenshotStore = ScreenshotStore.get(context)) : SQLiteOpenHelper(context, name, null, 17) {
+class LedgerStore(context: Context, private val name: String = "ledger.db", private val screenshots: ScreenshotStore = ScreenshotStore.get(context)) : SQLiteOpenHelper(context, name, null, 18) {
     internal val reimbursementContext: Context = context.applicationContext
     internal val reimbursementDirectory = java.io.File(context.filesDir, "reimbursement-originals/" + UUID.nameUUIDFromBytes(name.toByteArray()).toString())
     private fun imageOwner(id: Long) = "ledger:$name:$id"
@@ -72,7 +74,7 @@ class LedgerStore(context: Context, private val name: String = "ledger.db", priv
             id INTEGER PRIMARY KEY AUTOINCREMENT, uid TEXT NOT NULL UNIQUE,
             source TEXT NOT NULL, origin TEXT NOT NULL, raw_text TEXT NOT NULL,
             received_at INTEGER NOT NULL, amount INTEGER, direction TEXT,
-            merchant TEXT NOT NULL, category TEXT NOT NULL, occurred_at INTEGER NOT NULL,
+            merchant TEXT NOT NULL, display_name TEXT, category TEXT NOT NULL, occurred_at INTEGER NOT NULL,
             transaction_id TEXT, reliable INTEGER NOT NULL, time_explicit INTEGER NOT NULL,
             state TEXT NOT NULL, reason TEXT NOT NULL, duplicate_id INTEGER, note TEXT NOT NULL, tags TEXT NOT NULL DEFAULT '',
             requires_reimbursement INTEGER NOT NULL DEFAULT 0 CHECK(requires_reimbursement IN (0,1)))""")
@@ -95,12 +97,14 @@ class LedgerStore(context: Context, private val name: String = "ledger.db", priv
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if(oldVersion<13)upgradeLegacy(db,oldVersion,13)
-        check(oldVersion in 1..16 && newVersion==17) { "Unsupported database migration $oldVersion → $newVersion" }
+        check(oldVersion in 1..17 && newVersion==18) { "Unsupported database migration $oldVersion → $newVersion" }
         AccountPostings.create(db)
         PlatformImportAccounts.create(db)
         AccountTransfers.createSchema(db)
         createBatchDeletionSchema(db)
         ImportBatches.create(db)
+        val columns=db.rawQuery("PRAGMA table_info(records)",null).use { c -> buildSet { while(c.moveToNext())add(c.getString(1)) } }
+        if("display_name" !in columns)db.execSQL("ALTER TABLE records ADD COLUMN display_name TEXT")
     }
 
     private fun createBatchDeletionSchema(db:SQLiteDatabase) {
@@ -645,6 +649,35 @@ class LedgerStore(context: Context, private val name: String = "ledger.db", priv
             ReimbursementStore.validateStoredRelationships(db)
             db.setTransactionSuccessful()
             return requireNotNull(get(id))
+        } finally { db.endTransaction() }
+    }
+
+    /** Presentation edits never change recognized names, duplicate identities, icons or postings. */
+    @Synchronized fun setRecordDisplayName(id:Long,uid:String,name:String,expectedName:String):LedgerRecord {
+        val value=name.trim()
+        require(value.isNotEmpty()) { "请输入显示名称" }
+        require(name.length<=1024 && value.none { it=='\n' || it=='\r' || it=='\u0000' }) { "显示名称过长或含有换行" }
+        return updateResultText(id,uid) { current ->
+            check(current.merchantName==expectedName) { "名称已在其他位置修改，请取消后重新打开" }
+            ContentValues().apply { put("display_name",value.takeUnless { it==current.bill.merchant }) }
+        }
+    }
+
+    @Synchronized fun setRecordNote(id:Long,uid:String,note:String,expectedNote:String):LedgerRecord {
+        require(note.length<=500 && '\u0000' !in note) { "备注最多 500 字" }
+        return updateResultText(id,uid) { current ->
+            check(current.note==expectedNote) { "备注已在其他位置修改，请取消后重新打开" }
+            ContentValues().apply { put("note",note.trim()) }
+        }
+    }
+
+    private fun updateResultText(id:Long,uid:String,values:(LedgerRecord)->ContentValues):LedgerRecord {
+        val db=writableDatabase;db.beginTransaction()
+        try {
+            val current=requireNotNull(get(id)) { "账单已不存在" }
+            require(current.uid==uid && current.state==RecordState.POSTED) { "账单已变更，请重新打开" }
+            check(db.update("records",values(current),"id=? AND uid=? AND state='POSTED' AND NOT EXISTS(SELECT 1 FROM record_deletions d WHERE d.record_id=records.id)",arrayOf(id.toString(),uid))==1) { "账单已变更，请重新打开" }
+            db.setTransactionSuccessful();return requireNotNull(get(id))
         } finally { db.endTransaction() }
     }
 
@@ -1401,7 +1434,7 @@ class LedgerStore(context: Context, private val name: String = "ledger.db", priv
         put("uid", r.uid); put("source", r.capture.source.name); put("origin", r.capture.origin)
         put("raw_text", r.capture.text); put("received_at", r.capture.receivedAt)
         put("amount", r.bill.amountCents); put("direction", r.bill.direction?.name)
-        put("merchant", r.bill.merchant); put("category", r.bill.category)
+        put("merchant", r.bill.merchant); put("display_name",r.displayName);put("category", r.bill.category)
         put("occurred_at", r.bill.occurredAt); put("transaction_id", r.bill.transactionId)
         put("reliable", if (r.bill.reliable) 1 else 0); put("time_explicit", if (r.bill.timeExplicit) 1 else 0)
         put("state", r.state.name); put("reason", r.reason); put("duplicate_id", r.duplicateId)
@@ -1428,6 +1461,7 @@ class LedgerStore(context: Context, private val name: String = "ledger.db", priv
             RecordState.valueOf(text("state")), text("reason"), optionalNumber("duplicate_id"), text("note"),
             TransactionIdentities.decode(text("transaction_identities")),BillTags.fromStorage(text("tags")),number("requires_reimbursement")==1L,if(c.getColumnIndex("account_uid")>=0)optionalText("account_uid") else null,if(c.getColumnIndex("account_effect")>=0)number("account_effect") else 0,
             affectsBalance=c.getColumnIndex("affects_balance")<0 || number("affects_balance")==1L,
-            accountSelectionExplicit=c.getColumnIndex("account_selection_explicit")>=0 && number("account_selection_explicit")==1L)
+            accountSelectionExplicit=c.getColumnIndex("account_selection_explicit")>=0 && number("account_selection_explicit")==1L,
+            displayName=if(c.getColumnIndex("display_name")>=0)optionalText("display_name") else null)
     }
 }

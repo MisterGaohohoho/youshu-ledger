@@ -59,6 +59,7 @@ class LedgerApp : Application() {
     val tasks by lazy { RecognitionTasks(this) }
     val screenshots by lazy { ScreenshotStore.get(this) }
     val monthlyBudget by lazy { MonthlyBudget(this) }
+    val displayPreferences by lazy { DisplayPreferences(this) }
     val captureQueue by lazy { net.ankio.ledger.capture.PaymentRecognitionQueue(this) }
     val executionLog by lazy { ExecutionLog(this) }
     val channels by lazy { ChannelSettings(this) }

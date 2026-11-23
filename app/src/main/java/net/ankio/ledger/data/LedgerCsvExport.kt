@@ -56,7 +56,7 @@ object LedgerCsvExport {
             val amount = Money.format(bill.amountCents!!)
             val refund = bill.refund
             val cells = when (format) {
-                Format.GENERAL -> listOf(at, bill.category, direction, amount, "CNY", bill.merchant,
+                Format.GENERAL -> listOf(at, bill.category, direction, amount, "CNY", record.merchantName,
                     record.note, record.uid, bill.transactionId.orEmpty(), source(record.capture.source),
                     record.capture.origin, date.format(Date(record.capture.receivedAt)),
                     if (bill.timeExplicit) "交易时间" else "识别时间", refund?.let { Money.format(it.originalAmountCents) }.orEmpty(),
@@ -64,7 +64,7 @@ object LedgerCsvExport {
                     refund?.mode.orEmpty(), refund?.refundId.orEmpty(), "已入账",BillTags.encode(record.tags),if(record.requiresReimbursement)"是" else "否")
                 Format.QIANJI -> {
                     val note = buildList {
-                        if (bill.merchant.isNotBlank()) add("商户：${bill.merchant}")
+                        if (record.merchantName.isNotBlank()) add("商户：${record.merchantName}")
                         if (record.note.isNotBlank()) add(record.note)
                         bill.transactionId?.takeIf { it.isNotBlank() }?.let { add("交易订单号：$it") }
                         if (refund != null) add("原付款：${Money.format(refund.originalAmountCents)}；已退款：${Money.format(refund.refundedCents)}")

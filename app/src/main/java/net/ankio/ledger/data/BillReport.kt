@@ -83,7 +83,7 @@ class BillReports(private val store:LedgerStore) {
         val db=store.readableDatabase;db.beginTransactionNonExclusive()
         try {
             val rows=mutableListOf<BillReport.Row>()
-            db.rawQuery("SELECT r.uid,r.occurred_at,r.merchant,r.category,r.direction,${ReimbursementStore.statisticalAmountSql()},r.tags,r.note,r.requires_reimbursement FROM records r WHERE $where AND (r.direction<>'INCOME' OR ${ReimbursementStore.statisticalAmountSql()}>0) ORDER BY r.occurred_at,r.id",args.toTypedArray()).use { c ->
+            db.rawQuery("SELECT r.uid,r.occurred_at,COALESCE(r.display_name,r.merchant),r.category,r.direction,${ReimbursementStore.statisticalAmountSql()},r.tags,r.note,r.requires_reimbursement FROM records r WHERE $where AND (r.direction<>'INCOME' OR ${ReimbursementStore.statisticalAmountSql()}>0) ORDER BY r.occurred_at,r.id",args.toTypedArray()).use { c ->
                 while(c.moveToNext()) {
                     require(rows.size<50_000) { "符合条件的账单超过 50000 笔，请缩小时间范围" }
                     rows+=BillReport.Row(c.getString(0),c.getLong(1),c.getString(2),c.getString(3),c.getString(4),c.getLong(5),
