@@ -1,5 +1,6 @@
 package net.ankio.ledger
 
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.UiAutomation
 import android.content.ContentValues
 import android.graphics.Bitmap
@@ -11,6 +12,8 @@ import android.provider.Settings
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.WindowInsets
+import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.EditText
 import android.widget.ScrollView
 import android.widget.TextView
@@ -44,6 +47,12 @@ class RecognitionEditingUiTest {
     private fun root(banner:RecognitionBanner)=RecognitionBanner::class.java.getDeclaredField("view").apply {isAccessible=true}.get(banner) as View
     private fun <T:View> control(banner:RecognitionBanner,tag:String):T=root(banner).findViewWithTag(tag)
     private fun editing(banner:RecognitionBanner)=banner.diagnostics().getString("editing").isNotEmpty()
+    private fun keyboardBounds(automation:UiAutomation):Rect? {
+        val windows=automation.windows
+        return try {
+            windows.firstOrNull {it.type==AccessibilityWindowInfo.TYPE_INPUT_METHOD}?.let {window ->Rect().also {window.getBoundsInScreen(it)}}
+        } finally {windows.forEach {it.recycle()}}
+    }
     private fun click(banner:RecognitionBanner,tag:String) {instrument.runOnMainSync {control<View>(banner,tag).performClick()}}
     private fun fill(banner:RecognitionBanner,value:String) {instrument.runOnMainSync {control<EditText>(banner,"result-editor-input").setText(value)}}
     private fun show(banner:RecognitionBanner,record:LedgerRecord) {
@@ -65,6 +74,8 @@ class RecognitionEditingUiTest {
     private fun withResult(body:(RecognitionBanner,LedgerRecord,UiAutomation)->Unit) {
         assumeTrue(app.packageName=="net.ankio.ledger.qa")
         val automation=instrument.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
+        val oldAutomationFlags=automation.serviceInfo.flags
+        automation.serviceInfo=automation.serviceInfo.apply {flags=flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS}
         val resolver=app.contentResolver
         val oldServices=Settings.Secure.getString(resolver,"enabled_accessibility_services")
         val oldEnabled=Settings.Secure.getInt(resolver,"accessibility_enabled",0)
@@ -92,6 +103,7 @@ class RecognitionEditingUiTest {
             Settings.Secure.putString(resolver,"enabled_accessibility_services",oldServices)
             Settings.Secure.putInt(resolver,"accessibility_enabled",oldEnabled)
             Settings.Secure.putString(resolver,"show_ime_with_hard_keyboard",oldKeyboard)
+            automation.serviceInfo=automation.serviceInfo.apply {flags=oldAutomationFlags}
             automation.dropShellPermissionIdentity()
             app.store.delete(record.id);app.store.deleteAccount(account.id);app.changed()
         }
@@ -167,24 +179,39 @@ class RecognitionEditingUiTest {
             capture(automation,"result-large-default.png")
         }
         click(banner,"result-note");fill(banner,"多行备注\n第二行\n第三行")
-        await {control<EditText>(banner,"result-editor-input").hasFocus() && root(banner).rootWindowInsets?.isVisible(android.view.WindowInsets.Type.ime())==true}
+        await {control<EditText>(banner,"result-editor-input").hasFocus() && root(banner).rootWindowInsets?.isVisible(WindowInsets.Type.ime())==true && keyboardBounds(automation)?.isEmpty==false}
+        instrument.runOnMainSync {
+            val outside=MotionEvent.obtain(0,SystemClock.uptimeMillis(),MotionEvent.ACTION_OUTSIDE,-10f,-10f,0)
+            try {root(banner).dispatchTouchEvent(outside)} finally {outside.recycle()}
+        }
+        SystemClock.sleep(300)
+        assertTrue("An outside/IME touch must not interrupt typing",root(banner).rootWindowInsets.isVisible(WindowInsets.Type.ime()))
         val scroll=control<ScrollView>(banner,"result-scroll")
         instrument.runOnMainSync {scroll.scrollTo(0,scroll.getChildAt(0).height)}
         instrument.waitForIdleSync()
+        val keyboard=requireNotNull(keyboardBounds(automation)) {"The input-method window must stay visible"}
         val positions=mutableListOf<Rect>()
         instrument.runOnMainSync {
             for(tag in listOf("result-editor-save","result-editor-cancel")) {
                 val control=control<View>(banner,tag);val visible=Rect()
                 assertTrue("$tag must be visible above the keyboard",control.getGlobalVisibleRect(visible))
-                assertEquals("$tag must not be clipped",control.height,visible.height());positions+=visible
+                assertEquals("$tag must not be clipped",control.height,visible.height())
+                assertEquals("$tag must not be clipped horizontally",control.width,visible.width())
+                val location=IntArray(2);control.getLocationOnScreen(location)
+                val bounds=Rect(location[0],location[1],location[0]+control.width,location[1]+control.height)
+                assertTrue("$tag $bounds must be above the keyboard $keyboard",bounds.bottom<=keyboard.top)
+                positions+=bounds
             }
             assertFalse(Rect.intersects(positions[0],positions[1]))
-            val metrics=app.getSystemService(android.view.WindowManager::class.java).currentWindowMetrics
-            val ime=root(banner).rootWindowInsets.getInsets(android.view.WindowInsets.Type.ime()).bottom
-            assertTrue("The keyboard must stay open during the geometry check",ime>0)
-            assertTrue(positions.all {it.bottom<=metrics.bounds.height()-ime})
+            // A top-aligned wrap-content overlay can report zero IME overlap while the keyboard is open.
+            assertTrue("The keyboard must stay open during the geometry check",root(banner).rootWindowInsets.isVisible(WindowInsets.Type.ime()))
         }
         capture(automation,"result-note-keyboard-${app.resources.configuration.fontScale}.png")
-        click(banner,"result-editor-cancel")
+        val cancel=positions[1];val downTime=SystemClock.uptimeMillis()
+        for(action in listOf(MotionEvent.ACTION_DOWN,MotionEvent.ACTION_UP)) {
+            val touch=MotionEvent.obtain(downTime,SystemClock.uptimeMillis(),action,cancel.exactCenterX(),cancel.exactCenterY(),0).apply {source=android.view.InputDevice.SOURCE_TOUCHSCREEN}
+            try {assertTrue(automation.injectInputEvent(touch,true))} finally {touch.recycle()}
+        }
+        await {!editing(banner)}
     }
 }

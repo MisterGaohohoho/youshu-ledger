@@ -104,9 +104,10 @@ class RecognitionBanner(private val service:Context) {
     private fun pauseResultExpiry() {
         hide?.let(handler::removeCallbacks);hide=null;resultDeadline=Long.MAX_VALUE
     }
-    private fun dismissResult() {
+    private fun dismissResult(hideKeyboard:Boolean=false) {
         when {
-            textEditor.showing -> textEditor.hideKeyboard()
+            // IME touches can also be reported as outside touches on accessibility windows.
+            textEditor.showing -> {if(hideKeyboard)textEditor.hideKeyboard()}
             accountPanel.showing -> accountPanel.close()
             else -> removeNow()
         }
@@ -149,7 +150,7 @@ class RecognitionBanner(private val service:Context) {
                 return handled
             }
             override fun dispatchKeyEvent(event:android.view.KeyEvent):Boolean {
-                if(event.keyCode==android.view.KeyEvent.KEYCODE_BACK) { if(event.action==android.view.KeyEvent.ACTION_UP)dismissResult(); return true }
+                if(event.keyCode==android.view.KeyEvent.KEYCODE_BACK) { if(event.action==android.view.KeyEvent.ACTION_UP)dismissResult(hideKeyboard=true); return true }
                 return super.dispatchKeyEvent(event)
             }
         }.apply {
